@@ -21,6 +21,28 @@ from pathlib import Path
 src_path = Path(__file__).parent / "src"
 sys.path.insert(0, str(src_path))
 
+
+def _use_utf8_console() -> None:
+    """Stop the script dying on its own output.
+
+    Every prompt and status line here contains emoji. On Windows the console
+    defaults to the locale code page (cp1252 on most installs), which cannot
+    encode them, so the first print() raises UnicodeEncodeError and the script
+    exits before the user reaches the menu -- with an encoding traceback that
+    says nothing about logging in. errors="replace" keeps that from ever being
+    fatal again on a terminal that still cannot render a character.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
+
+
+_use_utf8_console()
+
 from monarchmoney import CaptchaRequiredException, RequireMFAException
 from monarch_mcp_server.monarch_auth import (
     EmailOtpRequiredException,
