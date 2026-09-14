@@ -99,7 +99,7 @@ class TestMutatingToolList:
         """The two lists answer the same question and must not diverge."""
         from pathlib import Path
 
-        readme = (Path(__file__).resolve().parent.parent / "README.md").read_text()
+        readme = (Path(__file__).resolve().parent.parent / "README.md").read_text(encoding="utf-8")
         section = readme[readme.index("### Recommended: require approval") :]
         missing = {n for n in read_only.MUTATING_TOOLS if f"`{n}`" not in section}
         assert not missing, f"in MUTATING_TOOLS but not the README list: {sorted(missing)}"
