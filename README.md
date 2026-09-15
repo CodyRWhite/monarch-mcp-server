@@ -251,8 +251,37 @@ docker run --rm -it \
 The login script supports a cookie file for browser-cookie authentication.
 To use it, also mount your cookie file at `/tmp/monarch-cookie.txt:ro` and set `MONARCH_MCP_COOKIE_FILE=/tmp/monarch-cookie.txt` for the login container.
 
-The file must be readable by the container's UID: `10001`.
+The file must be readable by the container's uid `10001`, which conflicts with
+the `chmod 600` advised for the local flow: a 0600 file owned by your host user
+is not readable by uid 10001 inside the container. For the container login,
+either `chown 10001 cookie.txt` and keep it at 0600, or run the login container
+with `--user $(id -u)` so it reads the file as you. Do not widen it to 0644.
+Delete the file once the login has succeeded.
+
 Once saved, the session volume is sufficient for normal server launches.
+
+> [!IMPORTANT]
+> **The session is stored unencrypted in that volume.** This differs from a
+> local install, and the difference is easy to miss.
+>
+> On macOS and Windows the session goes to the system keyring. A container has
+> no keyring backend, so storage falls back to a file. That file is encrypted
+> at rest only on Windows, through DPAPI, so in a Linux container it holds your
+> Monarch session in plaintext. Permissions are as tight as a file can be, mode
+> 0600 inside a 0700 directory owned by uid 10001, but file permissions do not
+> help against anyone who can reach the volume from outside the container.
+>
+> Treat `monarch-session` as a secret. It can be read by root on the Docker
+> host, by any user in the `docker` group, by any other container that mounts
+> the same volume, by `docker cp` and `docker exec`, and by anything that backs
+> up `/var/lib/docker`. A Monarch session grants full read and write access to
+> your accounts and does not expire on its own, so a copy of this volume is a
+> lasting credential. Back it up only to somewhere you would keep a password,
+> and delete the volume with `docker volume rm monarch-session` when you are
+> done with it.
+>
+> The cookie file described below is the same kind of secret. Delete it once
+> the login has succeeded; it is only needed for that one run.
 
 ### Start the HTTP server
 
