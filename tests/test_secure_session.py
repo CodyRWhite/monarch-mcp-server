@@ -640,6 +640,38 @@ def file_session(monkeypatch, tmp_path):
 class TestFileFallbackWrites:
     """The file fallback holds a full access credential; treat it as one."""
 
+    def test_non_ascii_round_trips_regardless_of_locale(self, tmp_path, monkeypatch):
+        """The fallback is written UTF-8, so it must be read UTF-8.
+
+        read_text() with no encoding uses the locale's preferred encoding,
+        which on a non-UTF-8 Windows console is cp1252. A session blob holding
+        any non-ASCII character then either raises UnicodeDecodeError or
+        decodes to a different string than was stored, so the credential comes
+        back silently corrupt rather than missing.
+        """
+        token_file = tmp_path / "token.json"
+        monkeypatch.setattr(ss_module, "_TOKEN_FILE", token_file)
+
+        blob = json.dumps(
+            {"token": "abc", "name": "Zoë – café"}, ensure_ascii=False
+        )
+        assert any(ord(c) > 127 for c in blob)
+        ss_module._write_secret_file(token_file, blob)
+
+        assert token_file.read_bytes().decode("utf-8") == blob
+        assert ss_module.SecureMonarchSession()._load_token_file() == blob
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "POSIX mode bits are not how Windows protects this file. "
+            "os.stat() there reports a synthesised mode that ignores the ACL, "
+            "so the assertion below cannot express the property. The Windows "
+            "equivalent -- DPAPI encryption, which makes the bytes unreadable "
+            "to another local user regardless of ACL -- is covered by the "
+            "DPAPI tests."
+        ),
+    )
     def test_file_is_never_world_readable(self, file_session):
         """0600 must be set at creation, not after the bytes are on disk.
 
@@ -670,13 +702,19 @@ class TestFileFallbackWrites:
 
         def spy_replace(src, dst):
             # Before the rename lands, the live file still holds the old blob.
-            seen["during"] = ss_module._TOKEN_FILE.read_text()
+            seen["during"] = ss_module._TOKEN_FILE.read_text(encoding="utf-8")
             return real_replace(src, dst)
 
         monkeypatch.setattr(os, "replace", spy_replace)
         session.save_session_blob(token="replacement", auth_mode="token")
 
-        assert "original" in seen["during"]
+        # On Windows the blob is DPAPI-encrypted at rest, so the old token is
+        # never present as plaintext. Decrypt before asserting, or the test
+        # checks the storage format rather than the atomicity it is named for.
+        during = seen["during"]
+        if during.startswith(ss_module._DPAPI_PREFIX):
+            during = ss_module._dpapi_decrypt(during)
+        assert "original" in during
         assert session.load_session()["token"] == "replacement"
 
     def test_failed_write_leaves_no_temp_file_behind(self, file_session, monkeypatch):

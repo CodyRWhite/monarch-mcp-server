@@ -32,7 +32,7 @@ def test_tool_rows_allow_column_alignment(padding):
 
 
 def _documented():
-    return {m.group("name"): m.group("params") for m in ROW.finditer(README.read_text())}
+    return {m.group("name"): m.group("params") for m in ROW.finditer(README.read_text(encoding="utf-8"))}
 
 
 async def _registered():
@@ -89,7 +89,7 @@ async def test_documented_parameters_match_the_signatures():
 async def test_approval_list_covers_every_mutating_tool():
     """The approval section exists because the model reads back data it did
     not author. A mutating tool missing from it is the whole risk."""
-    text = README.read_text()
+    text = README.read_text(encoding="utf-8")
     section = text[text.index("### Recommended: require approval") :]
     registered = await _registered()
     mutating = {

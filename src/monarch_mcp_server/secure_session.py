@@ -328,7 +328,7 @@ class SecureMonarchSession:
     def _load_token_file(self) -> Optional[str]:
         if not _TOKEN_FILE.is_file():
             return None
-        raw = _TOKEN_FILE.read_text().strip()
+        raw = _TOKEN_FILE.read_text(encoding="utf-8").strip()
         if not raw:
             return None
 
