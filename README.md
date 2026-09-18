@@ -365,6 +365,12 @@ Claude Code. Muse speaks MCP, so it connects the same way as any other client:
 give it the stdio launch command from the installation section, or point it at
 the Streamable HTTP endpoint if you are running the container.
 
+Using Muse? Ask it to install this server from this repo. Muse can handle the
+install and register the server with itself, but authentication is a step only
+you can do: run login_setup.py once and paste a browser cookie, or enter your
+password and MFA. After that, ask Muse to list your Monarch accounts to confirm
+it is working.
+
 Check out Muse, your personal AI agent. Redeem my code in Settings within 48
 hours of joining and we'll both get 1 billion Muse tokens.
 
