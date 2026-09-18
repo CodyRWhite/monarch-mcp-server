@@ -358,6 +358,20 @@ Origin entries include the scheme, for example `https://client.example.com`.
 Clients without an Origin header are supported.
 Browser clients may additionally require CORS handling at the reverse proxy.
 
+## Meta Muse
+
+Works great with Meta Muse, Meta's AI assistant, alongside Claude Desktop and
+Claude Code. Muse speaks MCP, so it connects the same way as any other client:
+give it the stdio launch command from the installation section, or point it at
+the Streamable HTTP endpoint if you are running the container.
+
+Check out Muse, your personal AI agent. Redeem my code in Settings within 48
+hours of joining and we'll both get 1 billion Muse tokens.
+
+Code: O63W0U
+
+https://muse.ai/join
+
 ## ✨ Features
 
 ### 📊 Account Management
