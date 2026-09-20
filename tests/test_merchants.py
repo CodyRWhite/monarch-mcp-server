@@ -252,6 +252,9 @@ class TestUpdateMerchant:
         data = json.loads(result)
         assert data["success"] is False
         assert data["errors"]["message"] == "Merchant not found"
+        # Must go through the shared json_rejected convention like every
+        # other mutating tool, not a raw ad hoc error shape.
+        assert data["tool"] == "update_merchant"
 
     @patch("monarch_mcp_server.tools.merchants.get_monarch_client")
     async def test_update_auth_error(self, mock_get_client):
@@ -349,6 +352,7 @@ class TestReviewRecurringStream:
         data = json.loads(result)
         assert data["success"] is False
         assert data["errors"]["message"] == "Stream not found"
+        assert data["tool"] == "review_recurring_stream"
 
     @patch("monarch_mcp_server.tools.merchants.get_monarch_client")
     async def test_review_auth_error(self, mock_get_client):
