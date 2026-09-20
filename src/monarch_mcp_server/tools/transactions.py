@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
+from gql import gql
+
 from monarch_mcp_server.app import mcp
 from monarch_mcp_server.client import get_monarch_client
 from monarch_mcp_server.helpers import (
@@ -17,12 +19,48 @@ from monarch_mcp_server.helpers import (
     format_transaction,
     json_error,
     json_rejected,
+    normalize_date_range,
     payload_errors,
     json_success,
     tool_response_envelope,
 )
 
 logger = logging.getLogger(__name__)
+
+# monarchmoneycommunity's update_transaction only includes "amount" in its
+# mutation input when `if amount:` is truthy, so an explicit amount of
+# exactly 0 (e.g. correcting a reversed/voided charge) is silently dropped
+# instead of applied. This mirrors its own mutation to set amount directly,
+# bypassing that truthiness check for the one value it mishandles.
+SET_TRANSACTION_AMOUNT_MUTATION = gql(
+    """
+    mutation Web_TransactionDrawerUpdateTransactionAmount($input: UpdateTransactionMutationInput!) {
+        updateTransaction(input: $input) {
+            transaction {
+                id
+                amount
+                __typename
+            }
+            errors {
+                ...PayloadErrorFields
+                __typename
+            }
+            __typename
+        }
+    }
+
+    fragment PayloadErrorFields on PayloadError {
+        fieldErrors {
+            field
+            messages
+            __typename
+        }
+        message
+        code
+        __typename
+    }
+    """
+)
 
 KNOWN_CURRENCY_CODES = {
     "AED",
@@ -338,10 +376,11 @@ async def get_transactions(
         # transaction's `category.group` field.
 
         filters: Dict[str, Any] = {}
-        if start_date:
-            filters["start_date"] = start_date
-        if end_date:
-            filters["end_date"] = end_date
+        norm_start_date, norm_end_date = normalize_date_range(start_date, end_date)
+        if norm_start_date:
+            filters["start_date"] = norm_start_date
+        if norm_end_date:
+            filters["end_date"] = norm_end_date
 
         merged_account_ids: List[str] = list(account_ids) if account_ids else []
         if account_id and account_id not in merged_account_ids:
@@ -570,10 +609,11 @@ async def search_transactions(
 
         if search:
             filters["search"] = search
-        if start_date:
-            filters["start_date"] = start_date
-        if end_date:
-            filters["end_date"] = end_date
+        norm_start_date, norm_end_date = normalize_date_range(start_date, end_date)
+        if norm_start_date:
+            filters["start_date"] = norm_start_date
+        if norm_end_date:
+            filters["end_date"] = norm_end_date
         if category_ids:
             filters["category_ids"] = category_ids
         if account_ids:
@@ -723,6 +763,20 @@ async def update_transaction(
         errors = payload_errors(result, "updateTransaction")
         if errors:
             return json_rejected("update_transaction", errors)
+
+        if amount == 0:
+            # The call above silently dropped amount=0 (see
+            # SET_TRANSACTION_AMOUNT_MUTATION's comment); apply it directly.
+            zero_result = await client.gql_call(
+                operation="Web_TransactionDrawerUpdateTransactionAmount",
+                graphql_query=SET_TRANSACTION_AMOUNT_MUTATION,
+                variables={"input": {"id": transaction_id, "amount": 0}},
+            )
+            zero_errors = payload_errors(zero_result, "updateTransaction")
+            if zero_errors:
+                return json_rejected("update_transaction", zero_errors)
+            result = zero_result
+
         return json_success(result)
     except Exception as e:
         return json_error("update_transaction", e)

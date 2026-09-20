@@ -2,9 +2,34 @@
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from datetime import date
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Monarch has no history before this; used as "the beginning" for an
+# open-ended end_date-only range.
+_EARLIEST_PLAUSIBLE_DATE = "1900-01-01"
+
+
+def normalize_date_range(
+    start_date: Optional[str], end_date: Optional[str]
+) -> Tuple[Optional[str], Optional[str]]:
+    """Fill in the missing bound when exactly one of start_date/end_date is given.
+
+    The upstream Monarch client rejects a request with exactly one of the two
+    set (``"You must specify both a startDate and endDate, not just one of
+    them."``), which turns a completely natural call like
+    ``get_transactions(start_date="2026-01-01")`` ("show me transactions since
+    X") into an opaque crash. Treat a lone start_date as "since then" (default
+    end_date to today) and a lone end_date as "up through then" (default
+    start_date far enough back to include everything), so both succeed.
+    """
+    if start_date and not end_date:
+        end_date = date.today().isoformat()
+    elif end_date and not start_date:
+        start_date = _EARLIEST_PLAUSIBLE_DATE
+    return start_date, end_date
 
 
 def format_exception(exc: Exception) -> str:

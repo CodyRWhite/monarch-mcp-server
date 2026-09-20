@@ -1,5 +1,6 @@
 """Tests for tag-related MCP tools."""
 
+import asyncio
 import json
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -205,6 +206,70 @@ class TestAddTagNeverSilentlyReplaces:
         result = json.loads(await add_transaction_tag("txn-1", "tag-2"))
         assert result["success"] is False
         assert "Tag not found" in json.dumps(result)
+
+
+class TestAddTransactionTagConcurrency:
+    """add_transaction_tag is a read-modify-write; concurrent calls for the
+    same transaction must not let one write clobber the other."""
+
+    async def test_concurrent_adds_do_not_drop_a_tag(self, mock_monarch_client):
+        server_state = {"tags": []}
+
+        async def fake_get_details(transaction_id, redirect_posted=False):
+            await asyncio.sleep(0)  # yield control, like real network I/O
+            return {
+                "getTransaction": {
+                    "id": transaction_id,
+                    "tags": [{"id": t} for t in server_state["tags"]],
+                }
+            }
+
+        async def fake_set_tags(transaction_id, tag_ids):
+            await asyncio.sleep(0)
+            server_state["tags"] = tag_ids
+            return {
+                "setTransactionTags": {
+                    "transaction": {"id": transaction_id, "tags": tag_ids}
+                }
+            }
+
+        mock_monarch_client.get_transaction_details.side_effect = fake_get_details
+        mock_monarch_client.set_transaction_tags.side_effect = fake_set_tags
+
+        await asyncio.gather(
+            add_transaction_tag("txn-1", "tag-a"),
+            add_transaction_tag("txn-1", "tag-b"),
+        )
+
+        assert set(server_state["tags"]) == {"tag-a", "tag-b"}
+
+    async def test_different_transactions_are_not_serialized_against_each_other(
+        self, mock_monarch_client
+    ):
+        """The lock is per transaction_id, not global."""
+        calls = []
+
+        async def fake_get_details(transaction_id, redirect_posted=False):
+            calls.append(("get", transaction_id))
+            return {"getTransaction": {"id": transaction_id, "tags": []}}
+
+        async def fake_set_tags(transaction_id, tag_ids):
+            calls.append(("set", transaction_id))
+            return {
+                "setTransactionTags": {
+                    "transaction": {"id": transaction_id, "tags": tag_ids}
+                }
+            }
+
+        mock_monarch_client.get_transaction_details.side_effect = fake_get_details
+        mock_monarch_client.set_transaction_tags.side_effect = fake_set_tags
+
+        await asyncio.gather(
+            add_transaction_tag("txn-1", "tag-a"),
+            add_transaction_tag("txn-2", "tag-b"),
+        )
+
+        assert {"txn-1", "txn-2"} == {tid for _op, tid in calls}
 
 
 class TestSetTagsReportsRejection:

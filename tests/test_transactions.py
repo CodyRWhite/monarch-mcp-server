@@ -710,6 +710,8 @@ class TestGetTransactions:
         assert result[0]["is_pending"] is True
 
     async def test_passes_filters_to_client(self, mock_monarch_client):
+        from datetime import date
+
         await get_transactions(
             limit=10, offset=5, start_date="2026-03-01", account_id="acc-1"
         )
@@ -717,8 +719,30 @@ class TestGetTransactions:
             limit=10,
             offset=5,
             start_date="2026-03-01",
+            end_date=date.today().isoformat(),
             account_ids=["acc-1"],
         )
+
+    async def test_single_sided_start_date_is_paired_with_today(
+        self, mock_monarch_client
+    ):
+        """A lone start_date must not crash: the real client raises unless
+        both start_date and end_date are given, so end_date defaults to
+        today rather than propagating that as an opaque error."""
+        from datetime import date
+
+        await get_transactions(start_date="2026-03-01")
+        call_kwargs = mock_monarch_client.get_transactions.call_args.kwargs
+        assert call_kwargs["start_date"] == "2026-03-01"
+        assert call_kwargs["end_date"] == date.today().isoformat()
+
+    async def test_single_sided_end_date_is_paired_with_earliest(
+        self, mock_monarch_client
+    ):
+        await get_transactions(end_date="2020-01-01")
+        call_kwargs = mock_monarch_client.get_transactions.call_args.kwargs
+        assert call_kwargs["start_date"] == "1900-01-01"
+        assert call_kwargs["end_date"] == "2020-01-01"
 
     async def test_account_id_backward_compat(self, mock_monarch_client):
         await get_transactions(account_id="acc-1")
@@ -976,6 +1000,29 @@ class TestUpdateTransaction:
         mock_monarch_client.update_transaction.side_effect = Exception("Not found")
         result = await update_transaction("bad-id")
         assert "update_transaction" in result
+
+    async def test_amount_zero_is_actually_applied(self, mock_monarch_client):
+        """The upstream client's `if amount:` check drops amount=0 from its
+        mutation input, so this must fall back to a direct call rather than
+        silently reporting success while leaving the amount unchanged."""
+        mock_monarch_client.gql_call.return_value = {
+            "updateTransaction": {"transaction": {"id": "txn-1", "amount": 0}}
+        }
+
+        result = json.loads(await update_transaction("txn-1", amount=0))
+
+        mock_monarch_client.gql_call.assert_awaited_once()
+        call_kwargs = mock_monarch_client.gql_call.call_args.kwargs
+        assert call_kwargs["variables"]["input"] == {"id": "txn-1", "amount": 0}
+        assert result["updateTransaction"]["transaction"]["amount"] == 0
+
+    async def test_amount_zero_rejection_is_surfaced(self, mock_monarch_client):
+        mock_monarch_client.gql_call.return_value = {
+            "updateTransaction": {"errors": {"message": "nope"}}
+        }
+
+        result = json.loads(await update_transaction("txn-1", amount=0))
+        assert result["success"] is False
 
 
 class TestCategorizeTransaction:
