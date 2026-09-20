@@ -406,6 +406,7 @@ async def update_category(
                         "message": "No category found with the given ID.",
                     }
                 )
+            rollover = cat.get("rolloverPeriod")
             return json_success(
                 {
                     "dry_run": True,
@@ -415,6 +416,14 @@ async def update_category(
                         "icon": cat.get("icon"),
                         "exclude_from_budget": cat.get("excludeFromBudget"),
                         "is_disabled": cat.get("isDisabled"),
+                        # rollover_starting_balance is the exact value
+                        # rollover_start_month/rollover_starting_balance would
+                        # discard -- the whole reason dry_run exists for this
+                        # tool is to preview that irreversible reset, so it
+                        # must be visible here, not only after the fact.
+                        "rollover_starting_balance": (
+                            rollover.get("startingBalance") if rollover else None
+                        ),
                     },
                     "proposed_changes": provided,
                 }
@@ -429,9 +438,9 @@ async def update_category(
             variables={"input": category_input},
         )
 
-        errors = result.get("updateCategory", {}).get("errors")
+        errors = payload_errors(result, "updateCategory")
         if errors:
-            return json_success({"success": False, "errors": errors})
+            return json_rejected("update_category", errors)
 
         cat = result.get("updateCategory", {}).get("category", {})
         group = cat.get("group") or {}

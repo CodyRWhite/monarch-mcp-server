@@ -334,10 +334,50 @@ class TestUpdateCategory:
 
         assert result["dry_run"] is True
         assert result["current"]["name"] == "Fitness Subscriptions"
+        assert result["current"]["rollover_starting_balance"] is None
         assert result["proposed_changes"]["budgetVariability"] == "non_monthly"
         assert result["proposed_changes"]["rolloverEnabled"] is True
         # Mutation should NOT have been called
         assert mock_client.gql_call.call_args.kwargs["operation"] == "GetCategoryDetails"
+
+    @patch("monarch_mcp_server.tools.categories.get_monarch_client")
+    async def test_dry_run_shows_the_rollover_balance_about_to_be_reset(
+        self, mock_get_client
+    ):
+        """dry_run exists specifically to preview the rollover reset that
+        confirm_rollover_reset gates. The accumulated balance about to be
+        discarded must be visible here, not only discoverable after the
+        real write already happened."""
+        mock_client = AsyncMock()
+        mock_client.gql_call.return_value = {
+            "category": {
+                "id": "cat-123",
+                "order": 1,
+                "name": "Fitness Subscriptions",
+                "icon": "\U0001f3cb",
+                "isSystemCategory": False,
+                "systemCategory": None,
+                "excludeFromBudget": False,
+                "isDisabled": False,
+                "group": {"id": "grp-1", "name": "Bills", "type": "expense"},
+                "rolloverPeriod": {
+                    "id": "rp-1",
+                    "startingBalance": 842.17,
+                },
+                "budgetAmountsForMonth": None,
+            }
+        }
+        mock_get_client.return_value = mock_client
+
+        result = json.loads(
+            await update_category(
+                category_id="cat-123",
+                rollover_starting_balance=0,
+                dry_run=True,
+            )
+        )
+
+        assert result["current"]["rollover_starting_balance"] == 842.17
 
     @patch("monarch_mcp_server.tools.categories.get_monarch_client")
     async def test_dry_run_category_not_found(self, mock_get_client):
@@ -381,6 +421,9 @@ class TestUpdateCategory:
 
         assert result["success"] is False
         assert result["errors"]["code"] == "INVALID_INPUT"
+        # Must go through the shared json_rejected convention like every
+        # other mutating tool, not a raw ad hoc error shape.
+        assert result["tool"] == "update_category"
 
     @patch("monarch_mcp_server.tools.categories.get_monarch_client")
     async def test_auth_error(self, mock_get_client):
