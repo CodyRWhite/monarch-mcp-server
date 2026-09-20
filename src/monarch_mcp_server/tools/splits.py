@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 from monarch_mcp_server.app import mcp
 from monarch_mcp_server.client import get_monarch_client
 from monarch_mcp_server.helpers import (
+    tool_errors,
     json_error,
     json_rejected,
     json_success,
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
+@tool_errors
 async def get_transaction_splits(transaction_id: str) -> str:
     """
     Get the splits for a transaction.
@@ -28,15 +30,13 @@ async def get_transaction_splits(transaction_id: str) -> str:
     Returns:
         Split information for the transaction, or empty if not split.
     """
-    try:
-        client = await get_monarch_client()
-        result = await client.get_transaction_splits(transaction_id=transaction_id)
-        return json_success(result)
-    except Exception as e:
-        return json_error("get_transaction_splits", e)
+    client = await get_monarch_client()
+    result = await client.get_transaction_splits(transaction_id=transaction_id)
+    return json_success(result)
 
 
 @mcp.tool()
+@tool_errors
 async def split_transaction(
     transaction_id: str,
     splits: List[Dict[str, Any]],
@@ -57,25 +57,22 @@ async def split_transaction(
     Returns:
         The updated split information for the transaction.
     """
-    try:
-        client = await get_monarch_client()
-        result = await client.update_transaction_splits(
-            transaction_id=transaction_id,
-            split_data=splits,
-        )
+    client = await get_monarch_client()
+    result = await client.update_transaction_splits(
+        transaction_id=transaction_id,
+        split_data=splits,
+    )
 
-        # The outcome was previously hardcoded to success. Monarch rejects a
-        # split that does not sum to the original amount by returning errors in
-        # the payload of an HTTP 200, so this reported a write that never
-        # happened.
-        errors = payload_errors(result, "updateTransactionSplit")
-        if errors:
-            return json_rejected("split_transaction", errors)
+    # The outcome was previously hardcoded to success. Monarch rejects a
+    # split that does not sum to the original amount by returning errors in
+    # the payload of an HTTP 200, so this reported a write that never
+    # happened.
+    errors = payload_errors(result, "updateTransactionSplit")
+    if errors:
+        return json_rejected("split_transaction", errors)
 
-        return json_success({
-            "success": True,
-            "message": f"Transaction split into {len(splits)} parts" if splits else "Splits removed from transaction",
-            "splits": result,
-        })
-    except Exception as e:
-        return json_error("split_transaction", e)
+    return json_success({
+        "success": True,
+        "message": f"Transaction split into {len(splits)} parts" if splits else "Splits removed from transaction",
+        "splits": result,
+    })

@@ -14,6 +14,7 @@ from gql import gql
 from monarch_mcp_server.app import mcp
 from monarch_mcp_server.client import get_monarch_client
 from monarch_mcp_server.helpers import (
+    tool_errors,
     first_present,
     format_exception,
     format_transaction,
@@ -564,6 +565,7 @@ async def get_transactions(
 
 
 @mcp.tool()
+@tool_errors
 async def search_transactions(
     search: Optional[str] = None,
     limit: int = 100,
@@ -602,48 +604,46 @@ async def search_transactions(
     Returns:
         List of matching transactions with full details.
     """
-    try:
-        client = await get_monarch_client()
+    client = await get_monarch_client()
 
-        filters: Dict[str, Any] = {"limit": limit, "offset": offset}
+    filters: Dict[str, Any] = {"limit": limit, "offset": offset}
 
-        if search:
-            filters["search"] = search
-        norm_start_date, norm_end_date = normalize_date_range(start_date, end_date)
-        if norm_start_date:
-            filters["start_date"] = norm_start_date
-        if norm_end_date:
-            filters["end_date"] = norm_end_date
-        if category_ids:
-            filters["category_ids"] = category_ids
-        if account_ids:
-            filters["account_ids"] = account_ids
-        if tag_ids:
-            filters["tag_ids"] = tag_ids
-        if has_attachments is not None:
-            filters["has_attachments"] = has_attachments
-        if has_notes is not None:
-            filters["has_notes"] = has_notes
-        if hidden_from_reports is not None:
-            filters["hidden_from_reports"] = hidden_from_reports
-        if is_split is not None:
-            filters["is_split"] = is_split
-        if is_recurring is not None:
-            filters["is_recurring"] = is_recurring
+    if search:
+        filters["search"] = search
+    norm_start_date, norm_end_date = normalize_date_range(start_date, end_date)
+    if norm_start_date:
+        filters["start_date"] = norm_start_date
+    if norm_end_date:
+        filters["end_date"] = norm_end_date
+    if category_ids:
+        filters["category_ids"] = category_ids
+    if account_ids:
+        filters["account_ids"] = account_ids
+    if tag_ids:
+        filters["tag_ids"] = tag_ids
+    if has_attachments is not None:
+        filters["has_attachments"] = has_attachments
+    if has_notes is not None:
+        filters["has_notes"] = has_notes
+    if hidden_from_reports is not None:
+        filters["hidden_from_reports"] = hidden_from_reports
+    if is_split is not None:
+        filters["is_split"] = is_split
+    if is_recurring is not None:
+        filters["is_recurring"] = is_recurring
 
-        transactions_data = await client.get_transactions(**filters)
+    transactions_data = await client.get_transactions(**filters)
 
-        transaction_list = [
-            format_transaction(txn, extended=True)
-            for txn in transactions_data.get("allTransactions", {}).get("results", [])
-        ]
+    transaction_list = [
+        format_transaction(txn, extended=True)
+        for txn in transactions_data.get("allTransactions", {}).get("results", [])
+    ]
 
-        return json_success(transaction_list)
-    except Exception as e:
-        return json_error("search_transactions", e)
+    return json_success(transaction_list)
 
 
 @mcp.tool()
+@tool_errors
 async def get_transaction_details(transaction_id: str) -> str:
     """
     Get full details for a specific transaction.
@@ -656,15 +656,13 @@ async def get_transaction_details(transaction_id: str) -> str:
     Returns:
         Complete transaction details.
     """
-    try:
-        client = await get_monarch_client()
-        result = await client.get_transaction_details(transaction_id=transaction_id)
-        return json_success(result)
-    except Exception as e:
-        return json_error("get_transaction_details", e)
+    client = await get_monarch_client()
+    result = await client.get_transaction_details(transaction_id=transaction_id)
+    return json_success(result)
 
 
 @mcp.tool()
+@tool_errors
 async def create_transaction(
     date: str,
     account_id: str,
@@ -686,32 +684,30 @@ async def create_transaction(
         notes: Optional notes for the transaction
         update_balance: Whether to update the account balance (default: false)
     """
-    try:
-        client = await get_monarch_client()
+    client = await get_monarch_client()
 
-        transaction_data: Dict[str, Any] = {
-            "date": date,
-            "account_id": account_id,
-            "amount": amount,
-            "merchant_name": merchant_name,
-            "category_id": category_id,
-        }
+    transaction_data: Dict[str, Any] = {
+        "date": date,
+        "account_id": account_id,
+        "amount": amount,
+        "merchant_name": merchant_name,
+        "category_id": category_id,
+    }
 
-        if notes:
-            transaction_data["notes"] = notes
-        if update_balance:
-            transaction_data["update_balance"] = update_balance
+    if notes:
+        transaction_data["notes"] = notes
+    if update_balance:
+        transaction_data["update_balance"] = update_balance
 
-        result = await client.create_transaction(**transaction_data)
-        errors = payload_errors(result, "createTransaction")
-        if errors:
-            return json_rejected("create_transaction", errors)
-        return json_success(result)
-    except Exception as e:
-        return json_error("create_transaction", e)
+    result = await client.create_transaction(**transaction_data)
+    errors = payload_errors(result, "createTransaction")
+    if errors:
+        return json_rejected("create_transaction", errors)
+    return json_success(result)
 
 
 @mcp.tool()
+@tool_errors
 async def update_transaction(
     transaction_id: str,
     category_id: Optional[str] = None,
@@ -737,52 +733,50 @@ async def update_transaction(
         needs_review: Whether this transaction needs review
         notes: Notes for the transaction
     """
-    try:
-        client = await get_monarch_client()
+    client = await get_monarch_client()
 
-        update_data: Dict[str, Any] = {"transaction_id": transaction_id}
+    update_data: Dict[str, Any] = {"transaction_id": transaction_id}
 
-        if category_id is not None:
-            update_data["category_id"] = category_id
-        if merchant_name is not None:
-            update_data["merchant_name"] = merchant_name
-        if goal_id is not None:
-            update_data["goal_id"] = goal_id
-        if amount is not None:
-            update_data["amount"] = amount
-        if date is not None:
-            update_data["date"] = date
-        if hide_from_reports is not None:
-            update_data["hide_from_reports"] = hide_from_reports
-        if needs_review is not None:
-            update_data["needs_review"] = needs_review
-        if notes is not None:
-            update_data["notes"] = notes
+    if category_id is not None:
+        update_data["category_id"] = category_id
+    if merchant_name is not None:
+        update_data["merchant_name"] = merchant_name
+    if goal_id is not None:
+        update_data["goal_id"] = goal_id
+    if amount is not None:
+        update_data["amount"] = amount
+    if date is not None:
+        update_data["date"] = date
+    if hide_from_reports is not None:
+        update_data["hide_from_reports"] = hide_from_reports
+    if needs_review is not None:
+        update_data["needs_review"] = needs_review
+    if notes is not None:
+        update_data["notes"] = notes
 
-        result = await client.update_transaction(**update_data)
-        errors = payload_errors(result, "updateTransaction")
-        if errors:
-            return json_rejected("update_transaction", errors)
+    result = await client.update_transaction(**update_data)
+    errors = payload_errors(result, "updateTransaction")
+    if errors:
+        return json_rejected("update_transaction", errors)
 
-        if amount == 0:
-            # The call above silently dropped amount=0 (see
-            # SET_TRANSACTION_AMOUNT_MUTATION's comment); apply it directly.
-            zero_result = await client.gql_call(
-                operation="Web_TransactionDrawerUpdateTransactionAmount",
-                graphql_query=SET_TRANSACTION_AMOUNT_MUTATION,
-                variables={"input": {"id": transaction_id, "amount": 0}},
-            )
-            zero_errors = payload_errors(zero_result, "updateTransaction")
-            if zero_errors:
-                return json_rejected("update_transaction", zero_errors)
-            result = zero_result
+    if amount == 0:
+        # The call above silently dropped amount=0 (see
+        # SET_TRANSACTION_AMOUNT_MUTATION's comment); apply it directly.
+        zero_result = await client.gql_call(
+            operation="Web_TransactionDrawerUpdateTransactionAmount",
+            graphql_query=SET_TRANSACTION_AMOUNT_MUTATION,
+            variables={"input": {"id": transaction_id, "amount": 0}},
+        )
+        zero_errors = payload_errors(zero_result, "updateTransaction")
+        if zero_errors:
+            return json_rejected("update_transaction", zero_errors)
+        result = zero_result
 
-        return json_success(result)
-    except Exception as e:
-        return json_error("update_transaction", e)
+    return json_success(result)
 
 
 @mcp.tool()
+@tool_errors
 async def categorize_transaction(transaction_id: str, category_id: str) -> str:
     """
     Assign a category to a transaction.
@@ -791,20 +785,18 @@ async def categorize_transaction(transaction_id: str, category_id: str) -> str:
         transaction_id: The ID of the transaction to categorize
         category_id: The category ID to assign
     """
-    try:
-        client = await get_monarch_client()
-        result = await client.update_transaction(
-            transaction_id=transaction_id, category_id=category_id
-        )
-        errors = payload_errors(result, "updateTransaction")
-        if errors:
-            return json_rejected("categorize_transaction", errors)
-        return json_success(result)
-    except Exception as e:
-        return json_error("categorize_transaction", e)
+    client = await get_monarch_client()
+    result = await client.update_transaction(
+        transaction_id=transaction_id, category_id=category_id
+    )
+    errors = payload_errors(result, "updateTransaction")
+    if errors:
+        return json_rejected("categorize_transaction", errors)
+    return json_success(result)
 
 
 @mcp.tool()
+@tool_errors
 async def update_transaction_notes(
     transaction_id: str,
     notes: str,
@@ -824,27 +816,25 @@ async def update_transaction_notes(
     Returns:
         Updated transaction details.
     """
-    try:
-        client = await get_monarch_client()
+    client = await get_monarch_client()
 
-        if receipt_url:
-            formatted_notes = f"[Receipt: {receipt_url}] {notes}"
-        else:
-            formatted_notes = notes
+    if receipt_url:
+        formatted_notes = f"[Receipt: {receipt_url}] {notes}"
+    else:
+        formatted_notes = notes
 
-        result = await client.update_transaction(
-            transaction_id=transaction_id,
-            notes=formatted_notes,
-        )
-        errors = payload_errors(result, "updateTransaction")
-        if errors:
-            return json_rejected("update_transaction_notes", errors)
-        return json_success(result)
-    except Exception as e:
-        return json_error("update_transaction_notes", e)
+    result = await client.update_transaction(
+        transaction_id=transaction_id,
+        notes=formatted_notes,
+    )
+    errors = payload_errors(result, "updateTransaction")
+    if errors:
+        return json_rejected("update_transaction_notes", errors)
+    return json_success(result)
 
 
 @mcp.tool()
+@tool_errors
 async def mark_transaction_reviewed(transaction_id: str) -> str:
     """
     Mark a transaction as reviewed (clears the needs_review flag).
@@ -857,21 +847,19 @@ async def mark_transaction_reviewed(transaction_id: str) -> str:
     Returns:
         Updated transaction details.
     """
-    try:
-        client = await get_monarch_client()
-        result = await client.update_transaction(
-            transaction_id=transaction_id,
-            needs_review=False,
-        )
-        errors = payload_errors(result, "updateTransaction")
-        if errors:
-            return json_rejected("mark_transaction_reviewed", errors)
-        return json_success(result)
-    except Exception as e:
-        return json_error("mark_transaction_reviewed", e)
+    client = await get_monarch_client()
+    result = await client.update_transaction(
+        transaction_id=transaction_id,
+        needs_review=False,
+    )
+    errors = payload_errors(result, "updateTransaction")
+    if errors:
+        return json_rejected("mark_transaction_reviewed", errors)
+    return json_success(result)
 
 
 @mcp.tool()
+@tool_errors
 async def bulk_categorize_transactions(
     transaction_ids: List[str],
     category_id: str,
@@ -894,68 +882,66 @@ async def bulk_categorize_transactions(
         Summary of results including success/failure counts. When dry_run is
         True, the response includes a "dry_run" flag and the planned updates.
     """
-    try:
-        if dry_run:
-            return json_success({
-                "dry_run": True,
-                "total": len(transaction_ids),
-                "transaction_ids": list(transaction_ids),
-                "category_id": category_id,
-                "mark_reviewed": mark_reviewed,
-            })
-
-        client = await get_monarch_client()
-
-        results: Dict[str, Any] = {
+    if dry_run:
+        return json_success({
+            "dry_run": True,
             "total": len(transaction_ids),
-            "successful": 0,
-            "failed": 0,
-            "errors": [],
+            "transaction_ids": list(transaction_ids),
+            "category_id": category_id,
+            "mark_reviewed": mark_reviewed,
+        })
+
+    client = await get_monarch_client()
+
+    results: Dict[str, Any] = {
+        "total": len(transaction_ids),
+        "successful": 0,
+        "failed": 0,
+        "errors": [],
+    }
+
+    async def _update_one(txn_id: str) -> Any:
+        update_params: Dict[str, Any] = {
+            "transaction_id": txn_id,
+            "category_id": category_id,
         }
+        if mark_reviewed:
+            update_params["needs_review"] = False
+        # Returned, not discarded: Monarch refuses a write by putting
+        # errors in the payload of an HTTP 200, so the absence of an
+        # exception says nothing about whether anything was written.
+        return await client.update_transaction(**update_params)
 
-        async def _update_one(txn_id: str) -> Any:
-            update_params: Dict[str, Any] = {
-                "transaction_id": txn_id,
-                "category_id": category_id,
-            }
-            if mark_reviewed:
-                update_params["needs_review"] = False
-            # Returned, not discarded: Monarch refuses a write by putting
-            # errors in the payload of an HTTP 200, so the absence of an
-            # exception says nothing about whether anything was written.
-            return await client.update_transaction(**update_params)
+    # Use asyncio.gather for concurrent updates
+    tasks = [_update_one(txn_id) for txn_id in transaction_ids]
+    outcomes = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Use asyncio.gather for concurrent updates
-        tasks = [_update_one(txn_id) for txn_id in transaction_ids]
-        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+    for txn_id, outcome in zip(transaction_ids, outcomes):
+        if isinstance(outcome, Exception):
+            results["failed"] += 1
+            results["errors"].append(
+                {
+                    "transaction_id": txn_id,
+                    "error": format_exception(outcome),
+                }
+            )
+            continue
 
-        for txn_id, outcome in zip(transaction_ids, outcomes):
-            if isinstance(outcome, Exception):
-                results["failed"] += 1
-                results["errors"].append(
-                    {
-                        "transaction_id": txn_id,
-                        "error": format_exception(outcome),
-                    }
-                )
-                continue
+        errors = payload_errors(outcome, "updateTransaction")
+        if errors:
+            results["failed"] += 1
+            results["errors"].append(
+                {"transaction_id": txn_id, "error": errors}
+            )
+            continue
 
-            errors = payload_errors(outcome, "updateTransaction")
-            if errors:
-                results["failed"] += 1
-                results["errors"].append(
-                    {"transaction_id": txn_id, "error": errors}
-                )
-                continue
+        results["successful"] += 1
 
-            results["successful"] += 1
-
-        return json_success(results)
-    except Exception as e:
-        return json_error("bulk_categorize_transactions", e)
+    return json_success(results)
 
 
 @mcp.tool()
+@tool_errors
 async def delete_transaction(transaction_id: str) -> str:
     """
     Delete a transaction from Monarch Money.
@@ -968,18 +954,16 @@ async def delete_transaction(transaction_id: str) -> str:
     Returns:
         Confirmation of deletion.
     """
-    try:
-        client = await get_monarch_client()
-        # Upstream delete_transaction returns a bool, not a GraphQL payload, so
-        # there is no errors object to inspect. It raises on failure, which the
-        # except below turns into an error result.
-        result = await client.delete_transaction(transaction_id=transaction_id)
-        return json_success(result)
-    except Exception as e:
-        return json_error("delete_transaction", e)
+    client = await get_monarch_client()
+    # Upstream delete_transaction returns a bool, not a GraphQL payload, so
+    # there is no errors object to inspect. It raises on failure, which the
+    # except below turns into an error result.
+    result = await client.delete_transaction(transaction_id=transaction_id)
+    return json_success(result)
 
 
 @mcp.tool()
+@tool_errors
 async def get_recurring_transactions(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -996,60 +980,58 @@ async def get_recurring_transactions(
     Returns:
         List of upcoming recurring transactions.
     """
-    try:
-        client = await get_monarch_client()
+    client = await get_monarch_client()
 
-        filters: Dict[str, Any] = {}
-        if start_date:
-            filters["start_date"] = start_date
-        if end_date:
-            filters["end_date"] = end_date
+    filters: Dict[str, Any] = {}
+    if start_date:
+        filters["start_date"] = start_date
+    if end_date:
+        filters["end_date"] = end_date
 
-        result = await client.get_recurring_transactions(**filters)
+    result = await client.get_recurring_transactions(**filters)
 
-        recurring_list = []
-        for item in result.get("recurringTransactionItems", []):
-            recurring_info = {
-                "date": item.get("date"),
-                "amount": item.get("amount"),
-                "is_past": item.get("isPast", False),
-                "transaction_id": item.get("transactionId"),
-                "stream": (
-                    {
-                        "id": item.get("stream", {}).get("id"),
-                        "frequency": item.get("stream", {}).get("frequency"),
-                        "amount": item.get("stream", {}).get("amount"),
-                        "is_approximate": item.get("stream", {}).get(
-                            "isApproximate", False
-                        ),
-                        "merchant": (
-                            item.get("stream", {}).get("merchant", {}).get("name")
-                            if item.get("stream", {}).get("merchant")
-                            else None
-                        ),
-                    }
-                    if item.get("stream")
-                    else None
-                ),
-                "category": (
-                    item.get("category", {}).get("name")
-                    if item.get("category")
-                    else None
-                ),
-                "account": (
-                    item.get("account", {}).get("displayName")
-                    if item.get("account")
-                    else None
-                ),
-            }
-            recurring_list.append(recurring_info)
+    recurring_list = []
+    for item in result.get("recurringTransactionItems", []):
+        recurring_info = {
+            "date": item.get("date"),
+            "amount": item.get("amount"),
+            "is_past": item.get("isPast", False),
+            "transaction_id": item.get("transactionId"),
+            "stream": (
+                {
+                    "id": item.get("stream", {}).get("id"),
+                    "frequency": item.get("stream", {}).get("frequency"),
+                    "amount": item.get("stream", {}).get("amount"),
+                    "is_approximate": item.get("stream", {}).get(
+                        "isApproximate", False
+                    ),
+                    "merchant": (
+                        item.get("stream", {}).get("merchant", {}).get("name")
+                        if item.get("stream", {}).get("merchant")
+                        else None
+                    ),
+                }
+                if item.get("stream")
+                else None
+            ),
+            "category": (
+                item.get("category", {}).get("name")
+                if item.get("category")
+                else None
+            ),
+            "account": (
+                item.get("account", {}).get("displayName")
+                if item.get("account")
+                else None
+            ),
+        }
+        recurring_list.append(recurring_info)
 
-        return json_success(recurring_list)
-    except Exception as e:
-        return json_error("get_recurring_transactions", e)
+    return json_success(recurring_list)
 
 
 @mcp.tool()
+@tool_errors
 async def get_transactions_needing_review(
     needs_review: bool = True,
     days: Optional[int] = None,
@@ -1082,77 +1064,74 @@ async def get_transactions_needing_review(
     Returns:
         An envelope with the matching transactions under "data".
     """
-    try:
-        client = await get_monarch_client()
+    client = await get_monarch_client()
 
-        filters: Dict[str, Any] = {"limit": limit, "offset": offset}
+    filters: Dict[str, Any] = {"limit": limit, "offset": offset}
 
-        # Sent upstream rather than applied to an already fetched page. The
-        # previous local filter meant the tool asked for an arbitrary page of
-        # *all* transactions and reported however many of those happened to
-        # need review, with no way to tell that the page had been truncated
-        # and no offset to page past it. It also treated needs_review=False as
-        # "no filter" rather than as its inverse, so passing False returned
-        # every transaction on the page, including ones needing review.
-        filters["needs_review"] = needs_review
+    # Sent upstream rather than applied to an already fetched page. The
+    # previous local filter meant the tool asked for an arbitrary page of
+    # *all* transactions and reported however many of those happened to
+    # need review, with no way to tell that the page had been truncated
+    # and no offset to page past it. It also treated needs_review=False as
+    # "no filter" rather than as its inverse, so passing False returned
+    # every transaction on the page, including ones needing review.
+    filters["needs_review"] = needs_review
 
-        if days:
-            end = datetime.now().strftime("%Y-%m-%d")
-            start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-            filters["start_date"] = start
-            filters["end_date"] = end
+    if days:
+        end = datetime.now().strftime("%Y-%m-%d")
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        filters["start_date"] = start
+        filters["end_date"] = end
 
-        if account_id:
-            filters["account_ids"] = [account_id]
+    if account_id:
+        filters["account_ids"] = [account_id]
 
-        if without_notes_only:
-            filters["has_notes"] = False
+    if without_notes_only:
+        filters["has_notes"] = False
 
-        transactions_data = await client.get_transactions(**filters)
-        all_transactions = transactions_data.get("allTransactions") or {}
-        results = all_transactions.get("results") or []
-        total_count = all_transactions.get("totalCount")
+    transactions_data = await client.get_transactions(**filters)
+    all_transactions = transactions_data.get("allTransactions") or {}
+    results = all_transactions.get("results") or []
+    total_count = all_transactions.get("totalCount")
 
-        transaction_list = []
-        for txn in results:
-            if uncategorized_only:
-                category = txn.get("category")
-                if category and category.get("id"):
-                    continue
+    transaction_list = []
+    for txn in results:
+        if uncategorized_only:
+            category = txn.get("category")
+            if category and category.get("id"):
+                continue
 
-            transaction_list.append(format_transaction(txn))
+        transaction_list.append(format_transaction(txn))
 
-        args: Dict[str, Any] = {
-            "needs_review": needs_review,
-            "days": days,
-            "uncategorized_only": uncategorized_only,
-            "without_notes_only": without_notes_only,
-            "limit": limit,
-            "offset": offset,
-            "account_id": account_id,
-        }
-        # uncategorized_only is still applied locally, so it can shrink the
-        # page below the limit. Reporting the server side total alongside it
-        # would imply this page is complete, which it is not.
-        server_total = None if uncategorized_only else total_count
-        # Truncation must be judged on the page Monarch returned, not on what
-        # survived the local filter. Otherwise a page of 100 trimmed to 3 rows
-        # against a server total of 900 reports truncated=False, asserting
-        # completeness on 3 of 900.
-        raw_page_filled = isinstance(limit, int) and len(results) >= limit
-        envelope = tool_response_envelope(
-            "get_transactions_needing_review",
-            args,
-            transaction_list,
-            total_count=server_total,
-            search_info=(
-                {"local_filter": "uncategorized_only"}
-                if uncategorized_only
-                else None
-            ),
-        )
-        if raw_page_filled:
-            envelope["truncated"] = True
-        return json_success(envelope)
-    except Exception as e:
-        return json_error("get_transactions_needing_review", e)
+    args: Dict[str, Any] = {
+        "needs_review": needs_review,
+        "days": days,
+        "uncategorized_only": uncategorized_only,
+        "without_notes_only": without_notes_only,
+        "limit": limit,
+        "offset": offset,
+        "account_id": account_id,
+    }
+    # uncategorized_only is still applied locally, so it can shrink the
+    # page below the limit. Reporting the server side total alongside it
+    # would imply this page is complete, which it is not.
+    server_total = None if uncategorized_only else total_count
+    # Truncation must be judged on the page Monarch returned, not on what
+    # survived the local filter. Otherwise a page of 100 trimmed to 3 rows
+    # against a server total of 900 reports truncated=False, asserting
+    # completeness on 3 of 900.
+    raw_page_filled = isinstance(limit, int) and len(results) >= limit
+    envelope = tool_response_envelope(
+        "get_transactions_needing_review",
+        args,
+        transaction_list,
+        total_count=server_total,
+        search_info=(
+            {"local_filter": "uncategorized_only"}
+            if uncategorized_only
+            else None
+        ),
+    )
+    if raw_page_filled:
+        envelope["truncated"] = True
+    return json_success(envelope)

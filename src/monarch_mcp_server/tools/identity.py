@@ -7,7 +7,7 @@ from gql import gql
 
 from monarch_mcp_server.app import mcp
 from monarch_mcp_server.client import get_monarch_client
-from monarch_mcp_server.helpers import json_success, json_error
+from monarch_mcp_server.helpers import tool_errors, json_success, json_error
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +107,7 @@ async def _probe_capabilities(client) -> Dict[str, Any]:
 
 
 @mcp.tool()
+@tool_errors
 async def monarch_whoami() -> str:
     """
     Report who is signed in and what the account's plan entitles it to.
@@ -129,51 +130,48 @@ async def monarch_whoami() -> str:
         list. Entitlements ending in `_trial` are temporary -- a feature
         available today may disappear when the trial ends.
     """
-    try:
-        client = await get_monarch_client()
-        result = await client.gql_call(
-            operation="GetWhoAmI", graphql_query=WHOAMI_QUERY, variables={}
-        )
+    client = await get_monarch_client()
+    result = await client.gql_call(
+        operation="GetWhoAmI", graphql_query=WHOAMI_QUERY, variables={}
+    )
 
-        capabilities = await _probe_capabilities(client)
+    capabilities = await _probe_capabilities(client)
 
-        me: Dict[str, Any] = result.get("me") or {}
-        sub: Dict[str, Any] = result.get("subscription") or {}
-        entitlements = sub.get("entitlements") or []
-        trial_only = _trial_entitlements(entitlements)
+    me: Dict[str, Any] = result.get("me") or {}
+    sub: Dict[str, Any] = result.get("subscription") or {}
+    entitlements = sub.get("entitlements") or []
+    trial_only = _trial_entitlements(entitlements)
 
-        return json_success({
-            "user": {
-                "id": me.get("id"),
-                "name": me.get("name"),
-                "email": me.get("email"),
-                "timezone": me.get("timezone"),
-                "has_password": me.get("hasPassword"),
-                "external_auth_providers": me.get("externalAuthProviderNames") or [],
-            },
-            "subscription": {
-                "entitlements": entitlements,
-                "has_premium": sub.get("hasPremiumEntitlement"),
-                "on_free_trial": sub.get("isOnFreeTrial"),
-                "billing_period": sub.get("billingPeriod"),
-                "current_period_ends_at": sub.get("currentPeriodEndsAt"),
-                "trial_ends_at": sub.get("trialEndsAt"),
-                "will_cancel_at_period_end": sub.get("willCancelAtPeriodEnd"),
-                "payment_source": sub.get("paymentSource"),
-                "next_payment_amount": sub.get("nextPaymentAmount"),
-            },
-            "trial_entitlements": trial_only,
-            "capabilities": capabilities,
-            "note": (
-                "Monarch's schema is plan-gated. Treat a missing field -- "
-                "business entities especially -- as this account not having "
-                "that feature, not as a failure."
-                + (
-                    f" Entitlements {trial_only} come from a trial and will "
-                    "lapse, taking their fields with them."
-                    if trial_only else ""
-                )
-            ),
-        })
-    except Exception as e:
-        return json_error("monarch_whoami", e)
+    return json_success({
+        "user": {
+            "id": me.get("id"),
+            "name": me.get("name"),
+            "email": me.get("email"),
+            "timezone": me.get("timezone"),
+            "has_password": me.get("hasPassword"),
+            "external_auth_providers": me.get("externalAuthProviderNames") or [],
+        },
+        "subscription": {
+            "entitlements": entitlements,
+            "has_premium": sub.get("hasPremiumEntitlement"),
+            "on_free_trial": sub.get("isOnFreeTrial"),
+            "billing_period": sub.get("billingPeriod"),
+            "current_period_ends_at": sub.get("currentPeriodEndsAt"),
+            "trial_ends_at": sub.get("trialEndsAt"),
+            "will_cancel_at_period_end": sub.get("willCancelAtPeriodEnd"),
+            "payment_source": sub.get("paymentSource"),
+            "next_payment_amount": sub.get("nextPaymentAmount"),
+        },
+        "trial_entitlements": trial_only,
+        "capabilities": capabilities,
+        "note": (
+            "Monarch's schema is plan-gated. Treat a missing field -- "
+            "business entities especially -- as this account not having "
+            "that feature, not as a failure."
+            + (
+                f" Entitlements {trial_only} come from a trial and will "
+                "lapse, taking their fields with them."
+                if trial_only else ""
+            )
+        ),
+    })

@@ -7,7 +7,7 @@ from gql import gql
 
 from monarch_mcp_server.app import mcp
 from monarch_mcp_server.client import get_monarch_client
-from monarch_mcp_server.helpers import json_success, json_error
+from monarch_mcp_server.helpers import tool_errors, json_success, json_error
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ query GetDebtPaydown($input: SavingsCalculatorInput!) {
 
 
 @mcp.tool()
+@tool_errors
 async def get_debt_paydown(method: str = "planned") -> str:
     """
     Get the debt paydown plan and the accounts feeding it.
@@ -74,58 +75,55 @@ async def get_debt_paydown(method: str = "planned") -> str:
     Returns:
         JSON with the plan, per-account projections, and any excluded accounts.
     """
-    try:
-        client = await get_monarch_client()
-        result = await client.gql_call(
-            operation="GetDebtPaydown",
-            graphql_query=GET_DEBT_PAYDOWN_QUERY,
-            variables={"input": {"debtPaydownMethod": method}},
-        )
+    client = await get_monarch_client()
+    result = await client.gql_call(
+        operation="GetDebtPaydown",
+        graphql_query=GET_DEBT_PAYDOWN_QUERY,
+        variables={"input": {"debtPaydownMethod": method}},
+    )
 
-        accounts = result.get("debtAccounts") or []
-        plan: Dict[str, Any] = result.get("debtPaydownPlan") or {}
+    accounts = result.get("debtAccounts") or []
+    plan: Dict[str, Any] = result.get("debtPaydownPlan") or {}
 
-        included: List[Dict[str, Any]] = []
-        excluded: List[Dict[str, Any]] = []
-        for a in accounts:
-            row = {
-                "account_id": a.get("id"),
-                "name": a.get("displayName"),
-                "balance": a.get("displayBalance"),
-                "apr": a.get("apr"),
-                "minimum_payment": a.get("minimumPayment"),
-                "planned_payment": a.get("plannedPayment"),
+    included: List[Dict[str, Any]] = []
+    excluded: List[Dict[str, Any]] = []
+    for a in accounts:
+        row = {
+            "account_id": a.get("id"),
+            "name": a.get("displayName"),
+            "balance": a.get("displayBalance"),
+            "apr": a.get("apr"),
+            "minimum_payment": a.get("minimumPayment"),
+            "planned_payment": a.get("plannedPayment"),
+        }
+        (excluded if a.get("excludeFromDebtPaydown") else included).append(row)
+
+    total = sum(a.get("displayBalance") or 0 for a in accounts)
+    excluded_total = sum(r["balance"] or 0 for r in excluded)
+
+    return json_success({
+        "method": method,
+        "total_debt_across_accounts": round(total, 2),
+        "debt_in_plan": plan.get("currentDebtPrincipal"),
+        "debt_excluded_from_plan": round(excluded_total, 2),
+        "projected_interest": plan.get("projectedInterest"),
+        "projected_total": plan.get("projectedTotal"),
+        "debt_free_date": plan.get("debtFreeDate"),
+        "adjusted_debt_free_date": plan.get("adjustedDebtFreeDate"),
+        "excluded_accounts": excluded,
+        "included_accounts": included,
+        "projections": [
+            {
+                "name": (p.get("account") or {}).get("displayName"),
+                "principal": p.get("principal"),
+                "projected_interest": p.get("projectedInterest"),
+                "debt_free_date": p.get("debtFreeDate"),
             }
-            (excluded if a.get("excludeFromDebtPaydown") else included).append(row)
-
-        total = sum(a.get("displayBalance") or 0 for a in accounts)
-        excluded_total = sum(r["balance"] or 0 for r in excluded)
-
-        return json_success({
-            "method": method,
-            "total_debt_across_accounts": round(total, 2),
-            "debt_in_plan": plan.get("currentDebtPrincipal"),
-            "debt_excluded_from_plan": round(excluded_total, 2),
-            "projected_interest": plan.get("projectedInterest"),
-            "projected_total": plan.get("projectedTotal"),
-            "debt_free_date": plan.get("debtFreeDate"),
-            "adjusted_debt_free_date": plan.get("adjustedDebtFreeDate"),
-            "excluded_accounts": excluded,
-            "included_accounts": included,
-            "projections": [
-                {
-                    "name": (p.get("account") or {}).get("displayName"),
-                    "principal": p.get("principal"),
-                    "projected_interest": p.get("projectedInterest"),
-                    "debt_free_date": p.get("debtFreeDate"),
-                }
-                for p in (plan.get("debtAccountProjections") or [])
-            ],
-            "note": (
-                "Excluded accounts are not in the plan's principal, interest or "
-                "debt-free date. If a high-APR card is excluded, the projection "
-                "understates both the cost and the payoff time."
-            ),
-        })
-    except Exception as e:
-        return json_error("get_debt_paydown", e)
+            for p in (plan.get("debtAccountProjections") or [])
+        ],
+        "note": (
+            "Excluded accounts are not in the plan's principal, interest or "
+            "debt-free date. If a high-APR card is excluded, the projection "
+            "understates both the cost and the payoff time."
+        ),
+    })

@@ -9,6 +9,7 @@ from gql import gql
 from monarch_mcp_server.app import mcp
 from monarch_mcp_server.client import get_monarch_client
 from monarch_mcp_server.helpers import (
+    tool_errors,
     json_error,
     json_rejected,
     json_success,
@@ -19,44 +20,41 @@ logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
+@tool_errors
 async def get_transaction_categories() -> str:
     """Get all available transaction categories from Monarch Money."""
-    try:
-        client = await get_monarch_client()
-        data = await client.get_transaction_categories()
-        categories = []
-        for cat in data.get("categories", []):
-            group = cat.get("group") or {}
-            categories.append(
-                {
-                    "id": cat.get("id"),
-                    "name": cat.get("name"),
-                    "icon": cat.get("icon"),
-                    "group": group.get("name") if isinstance(group, dict) else None,
-                    "group_id": group.get("id") if isinstance(group, dict) else None,
-                }
-            )
-        return json_success(categories)
-    except Exception as e:
-        return json_error("get_transaction_categories", e)
+    client = await get_monarch_client()
+    data = await client.get_transaction_categories()
+    categories = []
+    for cat in data.get("categories", []):
+        group = cat.get("group") or {}
+        categories.append(
+            {
+                "id": cat.get("id"),
+                "name": cat.get("name"),
+                "icon": cat.get("icon"),
+                "group": group.get("name") if isinstance(group, dict) else None,
+                "group_id": group.get("id") if isinstance(group, dict) else None,
+            }
+        )
+    return json_success(categories)
 
 
 @mcp.tool()
+@tool_errors
 async def get_transaction_category_groups() -> str:
     """Get all transaction category groups (parent groupings for categories)."""
-    try:
-        client = await get_monarch_client()
-        data = await client.get_transaction_category_groups()
-        groups = [
-            {"id": g.get("id"), "name": g.get("name"), "type": g.get("type")}
-            for g in data.get("categoryGroups", [])
-        ]
-        return json_success(groups)
-    except Exception as e:
-        return json_error("get_transaction_category_groups", e)
+    client = await get_monarch_client()
+    data = await client.get_transaction_category_groups()
+    groups = [
+        {"id": g.get("id"), "name": g.get("name"), "type": g.get("type")}
+        for g in data.get("categoryGroups", [])
+    ]
+    return json_success(groups)
 
 
 @mcp.tool()
+@tool_errors
 async def create_transaction_category(
     group_id: str,
     transaction_category_name: str,
@@ -74,25 +72,22 @@ async def create_transaction_category(
         rollover_enabled: Optional, whether budget rollover is enabled
         rollover_type: Optional rollover type (e.g. "monthly")
     """
-    try:
-        client = await get_monarch_client()
-        kwargs: Dict[str, Any] = {
-            "group_id": group_id,
-            "transaction_category_name": transaction_category_name,
-        }
-        if icon is not None:
-            kwargs["icon"] = icon
-        if rollover_enabled is not None:
-            kwargs["rollover_enabled"] = rollover_enabled
-        if rollover_type is not None:
-            kwargs["rollover_type"] = rollover_type
-        result = await client.create_transaction_category(**kwargs)
-        errors = payload_errors(result, "createCategory")
-        if errors:
-            return json_rejected("create_transaction_category", errors)
-        return json_success(result)
-    except Exception as e:
-        return json_error("create_transaction_category", e)
+    client = await get_monarch_client()
+    kwargs: Dict[str, Any] = {
+        "group_id": group_id,
+        "transaction_category_name": transaction_category_name,
+    }
+    if icon is not None:
+        kwargs["icon"] = icon
+    if rollover_enabled is not None:
+        kwargs["rollover_enabled"] = rollover_enabled
+    if rollover_type is not None:
+        kwargs["rollover_type"] = rollover_type
+    result = await client.create_transaction_category(**kwargs)
+    errors = payload_errors(result, "createCategory")
+    if errors:
+        return json_rejected("create_transaction_category", errors)
+    return json_success(result)
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +217,7 @@ _VALID_ROLLOVER_FREQUENCY = {"monthly", "variable"}
 
 
 @mcp.tool()
+@tool_errors
 async def update_category(
     category_id: str,
     name: Optional[str] = None,
@@ -298,192 +294,190 @@ async def update_category(
                 dry_run=True,
             )
     """
-    try:
-        if (
-            budget_variability is not None
-            and budget_variability not in _VALID_BUDGET_VARIABILITY
-        ):
-            return json_success(
-                {
-                    "success": False,
-                    "message": (
-                        f"Invalid budget_variability: {budget_variability!r}. "
-                        f"Must be one of: {sorted(_VALID_BUDGET_VARIABILITY)}"
-                    ),
-                }
-            )
-
-        resets_rollover = [
-            arg
-            for arg, value in (
-                ("rollover_start_month", rollover_start_month),
-                ("rollover_starting_balance", rollover_starting_balance),
-            )
-            if value is not None
-        ]
-        # A dry run writes nothing, so it needs no confirmation. Blocking it
-        # here would contradict this very message, which offers dry_run as
-        # the way to preview the change.
-        if resets_rollover and not confirm_rollover_reset and not dry_run:
-            return json_success(
-                {
-                    "success": False,
-                    "message": (
-                        f"{' and '.join(resets_rollover)} restarts this "
-                        "category's rollover period and discards the balance "
-                        "accumulated so far, which cannot be undone. Pass "
-                        "confirm_rollover_reset=True to proceed, or use "
-                        "dry_run=True to preview. Renames, icons, group moves "
-                        "and budget variability do not need it."
-                    ),
-                }
-            )
-
-        if (
-            rollover_frequency is not None
-            and rollover_frequency not in _VALID_ROLLOVER_FREQUENCY
-        ):
-            return json_success(
-                {
-                    "success": False,
-                    "message": (
-                        f"Invalid rollover_frequency: {rollover_frequency!r}. "
-                        f"Must be one of: {sorted(_VALID_ROLLOVER_FREQUENCY)}"
-                    ),
-                }
-            )
-
-        provided: Dict[str, Any] = {}
-        if name is not None:
-            provided["name"] = name
-        if icon is not None:
-            provided["icon"] = icon
-        if group_id is not None:
-            provided["group"] = group_id
-        if category_type is not None:
-            provided["type"] = category_type
-        if exclude_from_budget is not None:
-            provided["excludeFromBudget"] = exclude_from_budget
-        if budget_variability is not None:
-            provided["budgetVariability"] = budget_variability
-        if rollover_enabled is not None:
-            provided["rolloverEnabled"] = rollover_enabled
-        if rollover_start_month is not None:
-            provided["rolloverStartMonth"] = rollover_start_month
-        if rollover_starting_balance is not None:
-            provided["rolloverStartingBalance"] = rollover_starting_balance
-        if rollover_frequency is not None:
-            provided["rolloverFrequency"] = rollover_frequency
-        if rollover_target_amount is not None:
-            provided["rolloverTargetAmount"] = rollover_target_amount
-        if rollover_type is not None:
-            provided["rolloverType"] = rollover_type
-
-        if not provided:
-            return json_success(
-                {
-                    "success": False,
-                    "message": "At least one field to update must be provided.",
-                }
-            )
-
-        if dry_run:
-            client = await get_monarch_client()
-            current = await client.gql_call(
-                operation="GetCategoryDetails",
-                graphql_query=GET_CATEGORY_DETAILS_QUERY,
-                variables={
-                    "id": category_id,
-                    "month": datetime.now().strftime("%Y-%m-01"),
-                    "includeBudgetAmounts": False,
-                },
-            )
-            cat = current.get("category")
-            if not cat:
-                return json_success(
-                    {
-                        "success": False,
-                        "message": "No category found with the given ID.",
-                    }
-                )
-            rollover = cat.get("rolloverPeriod")
-            return json_success(
-                {
-                    "dry_run": True,
-                    "category_id": category_id,
-                    "current": {
-                        "name": cat.get("name"),
-                        "icon": cat.get("icon"),
-                        "exclude_from_budget": cat.get("excludeFromBudget"),
-                        "is_disabled": cat.get("isDisabled"),
-                        # rollover_starting_balance is the exact value
-                        # rollover_start_month/rollover_starting_balance would
-                        # discard -- the whole reason dry_run exists for this
-                        # tool is to preview that irreversible reset, so it
-                        # must be visible here, not only after the fact.
-                        "rollover_starting_balance": (
-                            rollover.get("startingBalance") if rollover else None
-                        ),
-                    },
-                    "proposed_changes": provided,
-                }
-            )
-
-        category_input: Dict[str, Any] = {"id": category_id, **provided}
-
-        client = await get_monarch_client()
-        result = await client.gql_call(
-            operation="Web_UpdateCategory",
-            graphql_query=UPDATE_CATEGORY_MUTATION,
-            variables={"input": category_input},
-        )
-
-        errors = payload_errors(result, "updateCategory")
-        if errors:
-            return json_rejected("update_category", errors)
-
-        cat = result.get("updateCategory", {}).get("category", {})
-        group = cat.get("group") or {}
-        rollover = cat.get("rolloverPeriod")
-
+    if (
+        budget_variability is not None
+        and budget_variability not in _VALID_BUDGET_VARIABILITY
+    ):
         return json_success(
             {
-                "success": True,
-                "category": {
-                    "id": cat.get("id"),
-                    "name": cat.get("name"),
-                    "icon": cat.get("icon"),
-                    "budget_variability": cat.get("budgetVariability"),
-                    "exclude_from_budget": cat.get("excludeFromBudget"),
-                    "is_system_category": cat.get("isSystemCategory"),
-                    "is_disabled": cat.get("isDisabled"),
-                    "group": {
-                        "id": group.get("id"),
-                        "type": group.get("type"),
-                        "group_level_budgeting_enabled": group.get(
-                            "groupLevelBudgetingEnabled"
-                        ),
-                    },
-                    "rollover_period": (
-                        {
-                            "id": rollover.get("id"),
-                            "start_month": rollover.get("startMonth"),
-                            "starting_balance": rollover.get("startingBalance"),
-                            "type": rollover.get("type"),
-                            "frequency": rollover.get("frequency"),
-                            "target_amount": rollover.get("targetAmount"),
-                        }
-                        if rollover
-                        else None
-                    ),
-                },
+                "success": False,
+                "message": (
+                    f"Invalid budget_variability: {budget_variability!r}. "
+                    f"Must be one of: {sorted(_VALID_BUDGET_VARIABILITY)}"
+                ),
             }
         )
-    except Exception as e:
-        return json_error("update_category", e)
+
+    resets_rollover = [
+        arg
+        for arg, value in (
+            ("rollover_start_month", rollover_start_month),
+            ("rollover_starting_balance", rollover_starting_balance),
+        )
+        if value is not None
+    ]
+    # A dry run writes nothing, so it needs no confirmation. Blocking it
+    # here would contradict this very message, which offers dry_run as
+    # the way to preview the change.
+    if resets_rollover and not confirm_rollover_reset and not dry_run:
+        return json_success(
+            {
+                "success": False,
+                "message": (
+                    f"{' and '.join(resets_rollover)} restarts this "
+                    "category's rollover period and discards the balance "
+                    "accumulated so far, which cannot be undone. Pass "
+                    "confirm_rollover_reset=True to proceed, or use "
+                    "dry_run=True to preview. Renames, icons, group moves "
+                    "and budget variability do not need it."
+                ),
+            }
+        )
+
+    if (
+        rollover_frequency is not None
+        and rollover_frequency not in _VALID_ROLLOVER_FREQUENCY
+    ):
+        return json_success(
+            {
+                "success": False,
+                "message": (
+                    f"Invalid rollover_frequency: {rollover_frequency!r}. "
+                    f"Must be one of: {sorted(_VALID_ROLLOVER_FREQUENCY)}"
+                ),
+            }
+        )
+
+    provided: Dict[str, Any] = {}
+    if name is not None:
+        provided["name"] = name
+    if icon is not None:
+        provided["icon"] = icon
+    if group_id is not None:
+        provided["group"] = group_id
+    if category_type is not None:
+        provided["type"] = category_type
+    if exclude_from_budget is not None:
+        provided["excludeFromBudget"] = exclude_from_budget
+    if budget_variability is not None:
+        provided["budgetVariability"] = budget_variability
+    if rollover_enabled is not None:
+        provided["rolloverEnabled"] = rollover_enabled
+    if rollover_start_month is not None:
+        provided["rolloverStartMonth"] = rollover_start_month
+    if rollover_starting_balance is not None:
+        provided["rolloverStartingBalance"] = rollover_starting_balance
+    if rollover_frequency is not None:
+        provided["rolloverFrequency"] = rollover_frequency
+    if rollover_target_amount is not None:
+        provided["rolloverTargetAmount"] = rollover_target_amount
+    if rollover_type is not None:
+        provided["rolloverType"] = rollover_type
+
+    if not provided:
+        return json_success(
+            {
+                "success": False,
+                "message": "At least one field to update must be provided.",
+            }
+        )
+
+    if dry_run:
+        client = await get_monarch_client()
+        current = await client.gql_call(
+            operation="GetCategoryDetails",
+            graphql_query=GET_CATEGORY_DETAILS_QUERY,
+            variables={
+                "id": category_id,
+                "month": datetime.now().strftime("%Y-%m-01"),
+                "includeBudgetAmounts": False,
+            },
+        )
+        cat = current.get("category")
+        if not cat:
+            return json_success(
+                {
+                    "success": False,
+                    "message": "No category found with the given ID.",
+                }
+            )
+        rollover = cat.get("rolloverPeriod")
+        return json_success(
+            {
+                "dry_run": True,
+                "category_id": category_id,
+                "current": {
+                    "name": cat.get("name"),
+                    "icon": cat.get("icon"),
+                    "exclude_from_budget": cat.get("excludeFromBudget"),
+                    "is_disabled": cat.get("isDisabled"),
+                    # rollover_starting_balance is the exact value
+                    # rollover_start_month/rollover_starting_balance would
+                    # discard -- the whole reason dry_run exists for this
+                    # tool is to preview that irreversible reset, so it
+                    # must be visible here, not only after the fact.
+                    "rollover_starting_balance": (
+                        rollover.get("startingBalance") if rollover else None
+                    ),
+                },
+                "proposed_changes": provided,
+            }
+        )
+
+    category_input: Dict[str, Any] = {"id": category_id, **provided}
+
+    client = await get_monarch_client()
+    result = await client.gql_call(
+        operation="Web_UpdateCategory",
+        graphql_query=UPDATE_CATEGORY_MUTATION,
+        variables={"input": category_input},
+    )
+
+    errors = payload_errors(result, "updateCategory")
+    if errors:
+        return json_rejected("update_category", errors)
+
+    cat = result.get("updateCategory", {}).get("category", {})
+    group = cat.get("group") or {}
+    rollover = cat.get("rolloverPeriod")
+
+    return json_success(
+        {
+            "success": True,
+            "category": {
+                "id": cat.get("id"),
+                "name": cat.get("name"),
+                "icon": cat.get("icon"),
+                "budget_variability": cat.get("budgetVariability"),
+                "exclude_from_budget": cat.get("excludeFromBudget"),
+                "is_system_category": cat.get("isSystemCategory"),
+                "is_disabled": cat.get("isDisabled"),
+                "group": {
+                    "id": group.get("id"),
+                    "type": group.get("type"),
+                    "group_level_budgeting_enabled": group.get(
+                        "groupLevelBudgetingEnabled"
+                    ),
+                },
+                "rollover_period": (
+                    {
+                        "id": rollover.get("id"),
+                        "start_month": rollover.get("startMonth"),
+                        "starting_balance": rollover.get("startingBalance"),
+                        "type": rollover.get("type"),
+                        "frequency": rollover.get("frequency"),
+                        "target_amount": rollover.get("targetAmount"),
+                    }
+                    if rollover
+                    else None
+                ),
+            },
+        }
+    )
 
 
 @mcp.tool()
+@tool_errors
 async def get_category_details(
     category_id: str,
     month: Optional[str] = None,
@@ -508,77 +502,75 @@ async def get_category_details(
         Check how Groceries is tracking this month:
             get_category_details(category_id="46433339325375401")
     """
-    try:
-        if not month:
-            month = datetime.now().strftime("%Y-%m-01")
+    if not month:
+        month = datetime.now().strftime("%Y-%m-01")
 
-        client = await get_monarch_client()
-        result = await client.gql_call(
-            operation="GetCategoryDetails",
-            graphql_query=GET_CATEGORY_DETAILS_QUERY,
-            variables={
-                "id": category_id,
-                "month": month,
-                "includeBudgetAmounts": True,
-            },
-        )
+    client = await get_monarch_client()
+    result = await client.gql_call(
+        operation="GetCategoryDetails",
+        graphql_query=GET_CATEGORY_DETAILS_QUERY,
+        variables={
+            "id": category_id,
+            "month": month,
+            "includeBudgetAmounts": True,
+        },
+    )
 
-        cat = result.get("category")
-        if not cat:
-            return json_success(
-                {
-                    "category": None,
-                    "message": "No category found with the given ID.",
-                }
-            )
-
-        group = cat.get("group") or {}
-        rollover = cat.get("rolloverPeriod")
-        budget = cat.get("budgetAmountsForMonth")
-
+    cat = result.get("category")
+    if not cat:
         return json_success(
             {
-                "id": cat.get("id"),
-                "name": cat.get("name"),
-                "icon": cat.get("icon"),
-                "order": cat.get("order"),
-                "is_system_category": cat.get("isSystemCategory"),
-                "exclude_from_budget": cat.get("excludeFromBudget"),
-                "is_disabled": cat.get("isDisabled"),
-                "group": {
-                    "id": group.get("id"),
-                    "name": group.get("name"),
-                    "type": group.get("type"),
-                },
-                "rollover_period": (
-                    {
-                        "id": rollover.get("id"),
-                        "starting_balance": rollover.get("startingBalance"),
-                    }
-                    if rollover
-                    else None
-                ),
-                "budget_amounts": (
-                    {
-                        "month": budget.get("month"),
-                        "planned_amount": budget.get("plannedAmount"),
-                        "actual_amount": budget.get("actualAmount"),
-                        "remaining_amount": budget.get("remainingAmount"),
-                        "previous_month_rollover_amount": budget.get(
-                            "previousMonthRolloverAmount"
-                        ),
-                        "rollover_type": budget.get("rolloverType"),
-                    }
-                    if budget
-                    else None
-                ),
+                "category": None,
+                "message": "No category found with the given ID.",
             }
         )
-    except Exception as e:
-        return json_error("get_category_details", e)
+
+    group = cat.get("group") or {}
+    rollover = cat.get("rolloverPeriod")
+    budget = cat.get("budgetAmountsForMonth")
+
+    return json_success(
+        {
+            "id": cat.get("id"),
+            "name": cat.get("name"),
+            "icon": cat.get("icon"),
+            "order": cat.get("order"),
+            "is_system_category": cat.get("isSystemCategory"),
+            "exclude_from_budget": cat.get("excludeFromBudget"),
+            "is_disabled": cat.get("isDisabled"),
+            "group": {
+                "id": group.get("id"),
+                "name": group.get("name"),
+                "type": group.get("type"),
+            },
+            "rollover_period": (
+                {
+                    "id": rollover.get("id"),
+                    "starting_balance": rollover.get("startingBalance"),
+                }
+                if rollover
+                else None
+            ),
+            "budget_amounts": (
+                {
+                    "month": budget.get("month"),
+                    "planned_amount": budget.get("plannedAmount"),
+                    "actual_amount": budget.get("actualAmount"),
+                    "remaining_amount": budget.get("remainingAmount"),
+                    "previous_month_rollover_amount": budget.get(
+                        "previousMonthRolloverAmount"
+                    ),
+                    "rollover_type": budget.get("rolloverType"),
+                }
+                if budget
+                else None
+            ),
+        }
+    )
 
 
 @mcp.tool()
+@tool_errors
 async def get_cashflow_by_month(
     start_date: str,
     end_date: str,
@@ -608,53 +600,50 @@ async def get_cashflow_by_month(
                 end_date="2026-05-31",
             )
     """
-    try:
-        client = await get_monarch_client()
-        result = await client.gql_call(
-            operation="GetAggregatesGraph",
-            graphql_query=GET_AGGREGATES_BY_MONTH_QUERY,
-            variables={"startDate": start_date, "endDate": end_date},
-        )
+    client = await get_monarch_client()
+    result = await client.gql_call(
+        operation="GetAggregatesGraph",
+        graphql_query=GET_AGGREGATES_BY_MONTH_QUERY,
+        variables={"startDate": start_date, "endDate": end_date},
+    )
 
-        aggregates = result.get("aggregates", [])
+    aggregates = result.get("aggregates", [])
 
-        categories_map: Dict[str, List[Dict[str, Any]]] = {}
-        for item in aggregates:
-            group_by = item.get("groupBy", {})
-            cat = group_by.get("category") or {}
-            cat_id = cat.get("id") or "uncategorized"
-            month_val = group_by.get("month")
-            total = item.get("summary", {}).get("sum", 0)
+    categories_map: Dict[str, List[Dict[str, Any]]] = {}
+    for item in aggregates:
+        group_by = item.get("groupBy", {})
+        cat = group_by.get("category") or {}
+        cat_id = cat.get("id") or "uncategorized"
+        month_val = group_by.get("month")
+        total = item.get("summary", {}).get("sum", 0)
 
-            if cat_id not in categories_map:
-                categories_map[cat_id] = []
-            categories_map[cat_id].append({"month": month_val, "sum": total})
+        if cat_id not in categories_map:
+            categories_map[cat_id] = []
+        categories_map[cat_id].append({"month": month_val, "sum": total})
 
-        categories_list: List[Dict[str, Any]] = []
-        for cat_id, monthly_totals in categories_map.items():
-            abs_total = sum(abs(m.get("sum", 0) or 0) for m in monthly_totals)
-            categories_list.append(
-                {
-                    "category_id": cat_id,
-                    "_sort_key": abs_total,
-                    "monthly_totals": sorted(
-                        monthly_totals, key=lambda m: m.get("month") or ""
-                    ),
-                }
-            )
-
-        categories_list.sort(key=lambda c: c["_sort_key"], reverse=True)
-
-        for cat in categories_list:
-            del cat["_sort_key"]
-
-        return json_success(
+    categories_list: List[Dict[str, Any]] = []
+    for cat_id, monthly_totals in categories_map.items():
+        abs_total = sum(abs(m.get("sum", 0) or 0) for m in monthly_totals)
+        categories_list.append(
             {
-                "period": {"start_date": start_date, "end_date": end_date},
-                "categories": categories_list,
+                "category_id": cat_id,
+                "_sort_key": abs_total,
+                "monthly_totals": sorted(
+                    monthly_totals, key=lambda m: m.get("month") or ""
+                ),
             }
         )
-    except Exception as e:
-        return json_error("get_cashflow_by_month", e)
+
+    categories_list.sort(key=lambda c: c["_sort_key"], reverse=True)
+
+    for cat in categories_list:
+        del cat["_sort_key"]
+
+    return json_success(
+        {
+            "period": {"start_date": start_date, "end_date": end_date},
+            "categories": categories_list,
+        }
+    )
 
 

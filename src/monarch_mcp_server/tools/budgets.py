@@ -10,7 +10,7 @@ from monarchmoney import MonarchMoney
 
 from monarch_mcp_server.app import mcp
 from monarch_mcp_server.client import get_monarch_client
-from monarch_mcp_server.helpers import json_success, json_error
+from monarch_mcp_server.helpers import tool_errors, json_success, json_error
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +115,7 @@ def format_budget_data(budget_data: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 @mcp.tool()
+@tool_errors
 async def get_budgets(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -132,15 +133,13 @@ async def get_budgets(
         cash-flow amount), ``actual`` (actual amount), ``remaining``,
         ``category_group`` (group name), and ``month`` (YYYY-MM-DD).
     """
-    try:
-        client = await get_monarch_client()
-        budget_data = await get_budget_data(client, start_date, end_date)
-        return json_success(format_budget_data(budget_data))
-    except Exception as e:
-        return json_error("get_budgets", e)
+    client = await get_monarch_client()
+    budget_data = await get_budget_data(client, start_date, end_date)
+    return json_success(format_budget_data(budget_data))
 
 
 @mcp.tool()
+@tool_errors
 async def set_budget_amount(
     amount: float,
     category_id: Optional[str] = None,
@@ -174,48 +173,45 @@ async def set_budget_amount(
         Clear a budget (set to 0):
             set_budget_amount(amount=0, category_id="cat_123")
     """
-    try:
-        if category_id and category_group_id:
-            return json_success({
-                "success": False,
-                "error": "Cannot specify both category_id and category_group_id. Choose one."
-            })
+    if category_id and category_group_id:
+        return json_success({
+            "success": False,
+            "error": "Cannot specify both category_id and category_group_id. Choose one."
+        })
 
-        if not category_id and not category_group_id:
-            return json_success({
-                "success": False,
-                "error": "Must specify either category_id or category_group_id."
-            })
+    if not category_id and not category_group_id:
+        return json_success({
+            "success": False,
+            "error": "Must specify either category_id or category_group_id."
+        })
 
-        client = await get_monarch_client()
+    client = await get_monarch_client()
 
-        params: Dict[str, Any] = {
+    params: Dict[str, Any] = {
+        "amount": amount,
+        "apply_to_future": apply_to_future,
+    }
+
+    if category_id:
+        params["category_id"] = category_id
+    if category_group_id:
+        params["category_group_id"] = category_group_id
+    if start_date:
+        params["start_date"] = start_date
+
+    result = await client.set_budget_amount(**params)
+
+    # No literal "success": True here. The upstream mutation selects no
+    # errors field, so there is nothing to check and nothing that justifies
+    # asserting the write landed. Report what was requested and hand back
+    # the raw result rather than a claim the response cannot support.
+    return json_success({
+        "requested": {
             "amount": amount,
             "apply_to_future": apply_to_future,
-        }
-
-        if category_id:
-            params["category_id"] = category_id
-        if category_group_id:
-            params["category_group_id"] = category_group_id
-        if start_date:
-            params["start_date"] = start_date
-
-        result = await client.set_budget_amount(**params)
-
-        # No literal "success": True here. The upstream mutation selects no
-        # errors field, so there is nothing to check and nothing that justifies
-        # asserting the write landed. Report what was requested and hand back
-        # the raw result rather than a claim the response cannot support.
-        return json_success({
-            "requested": {
-                "amount": amount,
-                "apply_to_future": apply_to_future,
-                "category_id": category_id,
-                "category_group_id": category_group_id,
-                "start_date": start_date,
-            },
-            "result": result,
-        })
-    except Exception as e:
-        return json_error("set_budget_amount", e)
+            "category_id": category_id,
+            "category_group_id": category_group_id,
+            "start_date": start_date,
+        },
+        "result": result,
+    })

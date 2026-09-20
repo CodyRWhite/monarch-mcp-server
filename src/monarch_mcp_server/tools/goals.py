@@ -12,6 +12,7 @@ from gql import gql
 from monarch_mcp_server.app import mcp
 from monarch_mcp_server.client import get_monarch_client
 from monarch_mcp_server.helpers import (
+    tool_errors,
     json_error,
     json_rejected,
     json_success,
@@ -64,6 +65,7 @@ query GetSavingsGoals {
 
 
 @mcp.tool()
+@tool_errors
 async def get_goals() -> str:
     """
     List Monarch savings and debt-paydown goals.
@@ -82,50 +84,47 @@ async def get_goals() -> str:
     Returns:
         JSON list of goals with progress and the accounts allocated to each.
     """
-    try:
-        client = await get_monarch_client()
-        result = await client.gql_call(
-            operation="GetSavingsGoals", graphql_query=GET_GOALS_QUERY, variables={}
-        )
+    client = await get_monarch_client()
+    result = await client.gql_call(
+        operation="GetSavingsGoals", graphql_query=GET_GOALS_QUERY, variables={}
+    )
 
-        goals = []
-        for g in result.get("savingsGoals") or []:
-            goals.append({
-                "id": g.get("id"),
-                "name": g.get("name"),
-                "type": g.get("type"),
-                "status": g.get("status"),
-                "priority": g.get("priority"),
-                "current_balance": g.get("currentBalance"),
-                "progress_percent": (
-                    round(g["progress"] * 100, 1)
-                    if isinstance(g.get("progress"), (int, float)) else None
-                ),
-                "target_amount": g.get("targetAmount"),
-                "target_date": g.get("targetDate"),
-                "planned_monthly_contribution": g.get("plannedMonthlyContribution"),
-                "estimated_months_until_completion": g.get(
-                    "estimatedMonthsUntilCompletion"),
-                "forecasted_completion_date": g.get("forecastedCompletionDate"),
-                "is_sinking_fund": g.get("isSinkingFund"),
-                "created_at": g.get("createdAt"),
-                "archived_at": g.get("archivedAt"),
-                "completed_at": g.get("completedAt"),
-            })
-
-        return json_success({
-            "count": len(goals),
-            "note": (
-                "Goals track allocated ACCOUNT BALANCES, not categorized "
-                "transactions. A transaction rule only touches a goal via "
-                "link_goal_id, which Monarch requires account_ids alongside. "
-                "`archived_at` is raw and does not match the app's archive "
-                "state -- do not filter on it."
+    goals = []
+    for g in result.get("savingsGoals") or []:
+        goals.append({
+            "id": g.get("id"),
+            "name": g.get("name"),
+            "type": g.get("type"),
+            "status": g.get("status"),
+            "priority": g.get("priority"),
+            "current_balance": g.get("currentBalance"),
+            "progress_percent": (
+                round(g["progress"] * 100, 1)
+                if isinstance(g.get("progress"), (int, float)) else None
             ),
-            "goals": goals,
+            "target_amount": g.get("targetAmount"),
+            "target_date": g.get("targetDate"),
+            "planned_monthly_contribution": g.get("plannedMonthlyContribution"),
+            "estimated_months_until_completion": g.get(
+                "estimatedMonthsUntilCompletion"),
+            "forecasted_completion_date": g.get("forecastedCompletionDate"),
+            "is_sinking_fund": g.get("isSinkingFund"),
+            "created_at": g.get("createdAt"),
+            "archived_at": g.get("archivedAt"),
+            "completed_at": g.get("completedAt"),
         })
-    except Exception as e:
-        return json_error("get_goals", e)
+
+    return json_success({
+        "count": len(goals),
+        "note": (
+            "Goals track allocated ACCOUNT BALANCES, not categorized "
+            "transactions. A transaction rule only touches a goal via "
+            "link_goal_id, which Monarch requires account_ids alongside. "
+            "`archived_at` is raw and does not match the app's archive "
+            "state -- do not filter on it."
+        ),
+        "goals": goals,
+    })
 
 
 UPDATE_SAVINGS_GOAL_MUTATION = gql("""
@@ -157,6 +156,7 @@ mutation Common_UpdateSavingsGoal($input: UpdateSavingsGoalInput!) {
 
 
 @mcp.tool()
+@tool_errors
 async def update_savings_goal(
     goal_id: str,
     target_amount: Optional[float] = None,
@@ -199,57 +199,54 @@ async def update_savings_goal(
     Returns:
         JSON with the goal's state after the update.
     """
-    try:
-        changes: Dict[str, Any] = {}
-        if target_amount is not None:
-            changes["targetAmount"] = target_amount
-        if target_date is not None:
-            changes["targetDate"] = target_date
-        if name is not None:
-            changes["name"] = name
-        if priority is not None:
-            changes["priority"] = priority
-        if goal_type is not None:
-            changes["type"] = goal_type
-        if is_sinking_fund is not None:
-            changes["isSinkingFund"] = is_sinking_fund
+    changes: Dict[str, Any] = {}
+    if target_amount is not None:
+        changes["targetAmount"] = target_amount
+    if target_date is not None:
+        changes["targetDate"] = target_date
+    if name is not None:
+        changes["name"] = name
+    if priority is not None:
+        changes["priority"] = priority
+    if goal_type is not None:
+        changes["type"] = goal_type
+    if is_sinking_fund is not None:
+        changes["isSinkingFund"] = is_sinking_fund
 
-        if not changes:
-            return json_success({
-                "success": False,
-                "message": "Nothing to update -- pass at least one field.",
-            })
-
-        client = await get_monarch_client()
-        result = await client.gql_call(
-            operation="Common_UpdateSavingsGoal",
-            graphql_query=UPDATE_SAVINGS_GOAL_MUTATION,
-            variables={"input": {"id": goal_id, **changes}},
-        )
-
-        errors = payload_errors(result, "updateSavingsGoal")
-        if errors:
-            return json_rejected("update_savings_goal", errors)
-
-        payload = result.get("updateSavingsGoal") or {}
-
-        goal = payload.get("savingsGoal") or {}
+    if not changes:
         return json_success({
-            "success": True,
-            "goal_id": goal_id,
-            "changed": sorted(changes),
-            "goal": {
-                "id": goal.get("id"),
-                "name": goal.get("name"),
-                "target_amount": goal.get("targetAmount"),
-                "target_date": goal.get("targetDate"),
-                "planned_monthly_contribution": goal.get(
-                    "plannedMonthlyContribution"),
-                "priority": goal.get("priority"),
-            },
+            "success": False,
+            "message": "Nothing to update -- pass at least one field.",
         })
-    except Exception as e:
-        return json_error("update_savings_goal", e)
+
+    client = await get_monarch_client()
+    result = await client.gql_call(
+        operation="Common_UpdateSavingsGoal",
+        graphql_query=UPDATE_SAVINGS_GOAL_MUTATION,
+        variables={"input": {"id": goal_id, **changes}},
+    )
+
+    errors = payload_errors(result, "updateSavingsGoal")
+    if errors:
+        return json_rejected("update_savings_goal", errors)
+
+    payload = result.get("updateSavingsGoal") or {}
+
+    goal = payload.get("savingsGoal") or {}
+    return json_success({
+        "success": True,
+        "goal_id": goal_id,
+        "changed": sorted(changes),
+        "goal": {
+            "id": goal.get("id"),
+            "name": goal.get("name"),
+            "target_amount": goal.get("targetAmount"),
+            "target_date": goal.get("targetDate"),
+            "planned_monthly_contribution": goal.get(
+                "plannedMonthlyContribution"),
+            "priority": goal.get("priority"),
+        },
+    })
 
 
 GOAL_CONTRIBUTIONS_QUERY = gql("""
@@ -294,6 +291,7 @@ def _month_bounds(month: Optional[str]) -> Tuple[str, str]:
 
 
 @mcp.tool()
+@tool_errors
 async def get_goal_contributions(goal_id: str, month: Optional[str] = None) -> str:
     """
     Show a goal's budgeted contributions, broken down by funding account.
@@ -310,43 +308,41 @@ async def get_goal_contributions(goal_id: str, month: Optional[str] = None) -> s
     Returns:
         JSON with the month's planned/actual totals and the per-account split.
     """
-    try:
-        start, end = _month_bounds(month)
-        client = await get_monarch_client()
-        result = await client.gql_call(
-            operation="GetSavingsGoalContributions",
-            graphql_query=GOAL_CONTRIBUTIONS_QUERY,
-            variables={"id": goal_id, "startMonth": start, "endMonth": end},
-        )
-        goal = result.get("savingsGoal") or {}
-        months = []
-        for m in goal.get("monthlyBudgetAmounts") or []:
-            months.append({
-                "month": m.get("month"),
-                "total_planned": m.get("totalPlannedAmount"),
-                "total_actual": m.get("totalActualAmount"),
-                "total_remaining": m.get("totalRemainingAmount"),
-                "accounts": [
-                    {
-                        "account_id": (a.get("account") or {}).get("id"),
-                        "name": (a.get("account") or {}).get("displayName"),
-                        "planned": a.get("plannedAmount"),
-                        "actual": a.get("actualAmount"),
-                        "remaining": a.get("remainingAmount"),
-                    }
-                    for a in (m.get("accountBreakdown") or [])
-                ],
-            })
-        return json_success({
-            "goal_id": goal.get("id"),
-            "name": goal.get("name"),
-            "months": months,
+    start, end = _month_bounds(month)
+    client = await get_monarch_client()
+    result = await client.gql_call(
+        operation="GetSavingsGoalContributions",
+        graphql_query=GOAL_CONTRIBUTIONS_QUERY,
+        variables={"id": goal_id, "startMonth": start, "endMonth": end},
+    )
+    goal = result.get("savingsGoal") or {}
+    months = []
+    for m in goal.get("monthlyBudgetAmounts") or []:
+        months.append({
+            "month": m.get("month"),
+            "total_planned": m.get("totalPlannedAmount"),
+            "total_actual": m.get("totalActualAmount"),
+            "total_remaining": m.get("totalRemainingAmount"),
+            "accounts": [
+                {
+                    "account_id": (a.get("account") or {}).get("id"),
+                    "name": (a.get("account") or {}).get("displayName"),
+                    "planned": a.get("plannedAmount"),
+                    "actual": a.get("actualAmount"),
+                    "remaining": a.get("remainingAmount"),
+                }
+                for a in (m.get("accountBreakdown") or [])
+            ],
         })
-    except Exception as e:
-        return json_error("get_goal_contributions", e)
+    return json_success({
+        "goal_id": goal.get("id"),
+        "name": goal.get("name"),
+        "months": months,
+    })
 
 
 @mcp.tool()
+@tool_errors
 async def set_goal_contribution(
     goal_id: str, account_id: str, amount: float
 ) -> str:
@@ -365,29 +361,26 @@ async def set_goal_contribution(
         account_id: The funding account to budget from.
         amount: Monthly amount. 0 removes this account's contribution.
     """
-    try:
-        client = await get_monarch_client()
-        result = await client.gql_call(
-            operation="Common_UpdateSavingsGoal",
-            graphql_query=UPDATE_SAVINGS_GOAL_MUTATION,
-            variables={"input": {
-                "id": goal_id,
-                "accountBudgetAmounts": [
-                    {"accountId": account_id, "amount": amount}
-                ],
-            }},
-        )
-        errors = payload_errors(result, "updateSavingsGoal")
-        if errors:
-            return json_rejected("set_goal_contribution", errors)
+    client = await get_monarch_client()
+    result = await client.gql_call(
+        operation="Common_UpdateSavingsGoal",
+        graphql_query=UPDATE_SAVINGS_GOAL_MUTATION,
+        variables={"input": {
+            "id": goal_id,
+            "accountBudgetAmounts": [
+                {"accountId": account_id, "amount": amount}
+            ],
+        }},
+    )
+    errors = payload_errors(result, "updateSavingsGoal")
+    if errors:
+        return json_rejected("set_goal_contribution", errors)
 
-        payload = result.get("updateSavingsGoal") or {}
-        return json_success({
-            "success": True,
-            "goal_id": goal_id,
-            "account_id": account_id,
-            "amount": amount,
-            "note": "Other funding accounts for this goal were left unchanged.",
-        })
-    except Exception as e:
-        return json_error("set_goal_contribution", e)
+    payload = result.get("updateSavingsGoal") or {}
+    return json_success({
+        "success": True,
+        "goal_id": goal_id,
+        "account_id": account_id,
+        "amount": amount,
+        "note": "Other funding accounts for this goal were left unchanged.",
+    })

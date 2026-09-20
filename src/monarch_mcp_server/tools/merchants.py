@@ -8,6 +8,7 @@ from gql import gql
 from monarch_mcp_server.app import mcp
 from monarch_mcp_server.client import get_monarch_client
 from monarch_mcp_server.helpers import (
+    tool_errors,
     json_error,
     json_rejected,
     json_success,
@@ -109,6 +110,7 @@ mutation Web_ReviewStream($input: ReviewRecurringStreamInput!) {
 
 
 @mcp.tool()
+@tool_errors
 async def get_merchant(merchant_id: str) -> str:
     """
     Get a merchant's details including recurring transaction stream configuration.
@@ -129,51 +131,49 @@ async def get_merchant(merchant_id: str) -> str:
         Look up PennyMac merchant details:
             get_merchant(merchant_id="160319777541808781")
     """
-    try:
-        client = await get_monarch_client()
-        result = await client.gql_call(
-            operation="Common_GetEditMerchant",
-            graphql_query=GET_MERCHANT_QUERY,
-            variables={"merchantId": merchant_id},
+    client = await get_monarch_client()
+    result = await client.gql_call(
+        operation="Common_GetEditMerchant",
+        graphql_query=GET_MERCHANT_QUERY,
+        variables={"merchantId": merchant_id},
+    )
+
+    merchant = result.get("merchant")
+    if not merchant:
+        return json_success(
+            {
+                "merchant": None,
+                "message": "No merchant found with the given ID",
+            }
         )
 
-        merchant = result.get("merchant")
-        if not merchant:
-            return json_success(
-                {
-                    "merchant": None,
-                    "message": "No merchant found with the given ID",
-                }
-            )
+    stream = merchant.get("recurringTransactionStream")
+    merchant_info: Dict[str, Any] = {
+        "id": merchant.get("id"),
+        "name": merchant.get("name"),
+        "logo_url": merchant.get("logoUrl"),
+        "transaction_count": merchant.get("transactionCount"),
+        "rule_count": merchant.get("ruleCount"),
+        "can_be_deleted": merchant.get("canBeDeleted"),
+        "has_active_recurring_streams": merchant.get("hasActiveRecurringStreams"),
+        "recurring_stream": (
+            {
+                "id": stream.get("id"),
+                "frequency": stream.get("frequency"),
+                "amount": stream.get("amount"),
+                "base_date": stream.get("baseDate"),
+                "is_active": stream.get("isActive"),
+            }
+            if stream
+            else None
+        ),
+    }
 
-        stream = merchant.get("recurringTransactionStream")
-        merchant_info: Dict[str, Any] = {
-            "id": merchant.get("id"),
-            "name": merchant.get("name"),
-            "logo_url": merchant.get("logoUrl"),
-            "transaction_count": merchant.get("transactionCount"),
-            "rule_count": merchant.get("ruleCount"),
-            "can_be_deleted": merchant.get("canBeDeleted"),
-            "has_active_recurring_streams": merchant.get("hasActiveRecurringStreams"),
-            "recurring_stream": (
-                {
-                    "id": stream.get("id"),
-                    "frequency": stream.get("frequency"),
-                    "amount": stream.get("amount"),
-                    "base_date": stream.get("baseDate"),
-                    "is_active": stream.get("isActive"),
-                }
-                if stream
-                else None
-            ),
-        }
-
-        return json_success({"merchant": merchant_info})
-    except Exception as e:
-        return json_error("get_merchant", e)
+    return json_success({"merchant": merchant_info})
 
 
 @mcp.tool()
+@tool_errors
 async def update_merchant(
     merchant_id: str,
     name: Optional[str] = None,
@@ -216,74 +216,72 @@ async def update_merchant(
                 is_active=True,
             )
     """
-    try:
-        recurrence_fields: Dict[str, Any] = {
-            k: v
-            for k, v in {
-                "isRecurring": is_recurring,
-                "frequency": frequency,
-                "baseDate": base_date,
-                "amount": amount,
-                "isActive": is_active,
-            }.items()
-            if v is not None
-        }
+    recurrence_fields: Dict[str, Any] = {
+        k: v
+        for k, v in {
+            "isRecurring": is_recurring,
+            "frequency": frequency,
+            "baseDate": base_date,
+            "amount": amount,
+            "isActive": is_active,
+        }.items()
+        if v is not None
+    }
 
-        if name is None and not recurrence_fields:
-            return json_success(
-                {
-                    "success": False,
-                    "message": "At least one field (name or recurrence) "
-                    "must be provided",
-                }
-            )
-
-        merchant_input: Dict[str, Any] = {"merchantId": merchant_id}
-
-        if name is not None:
-            merchant_input["name"] = name
-
-        if recurrence_fields:
-            merchant_input["recurrence"] = recurrence_fields
-
-        client = await get_monarch_client()
-        result = await client.gql_call(
-            operation="Common_UpdateMerchant",
-            graphql_query=UPDATE_MERCHANT_MUTATION,
-            variables={"input": merchant_input},
-        )
-
-        errors = payload_errors(result, "updateMerchant")
-        if errors:
-            return json_rejected("update_merchant", errors)
-
-        merchant = result.get("updateMerchant", {}).get("merchant", {})
-        stream = merchant.get("recurringTransactionStream")
+    if name is None and not recurrence_fields:
         return json_success(
             {
-                "success": True,
-                "merchant": {
-                    "id": merchant.get("id"),
-                    "name": merchant.get("name"),
-                    "recurring_stream": (
-                        {
-                            "id": stream.get("id"),
-                            "frequency": stream.get("frequency"),
-                            "amount": stream.get("amount"),
-                            "base_date": stream.get("baseDate"),
-                            "is_active": stream.get("isActive"),
-                        }
-                        if stream
-                        else None
-                    ),
-                },
+                "success": False,
+                "message": "At least one field (name or recurrence) "
+                "must be provided",
             }
         )
-    except Exception as e:
-        return json_error("update_merchant", e)
+
+    merchant_input: Dict[str, Any] = {"merchantId": merchant_id}
+
+    if name is not None:
+        merchant_input["name"] = name
+
+    if recurrence_fields:
+        merchant_input["recurrence"] = recurrence_fields
+
+    client = await get_monarch_client()
+    result = await client.gql_call(
+        operation="Common_UpdateMerchant",
+        graphql_query=UPDATE_MERCHANT_MUTATION,
+        variables={"input": merchant_input},
+    )
+
+    errors = payload_errors(result, "updateMerchant")
+    if errors:
+        return json_rejected("update_merchant", errors)
+
+    merchant = result.get("updateMerchant", {}).get("merchant", {})
+    stream = merchant.get("recurringTransactionStream")
+    return json_success(
+        {
+            "success": True,
+            "merchant": {
+                "id": merchant.get("id"),
+                "name": merchant.get("name"),
+                "recurring_stream": (
+                    {
+                        "id": stream.get("id"),
+                        "frequency": stream.get("frequency"),
+                        "amount": stream.get("amount"),
+                        "base_date": stream.get("baseDate"),
+                        "is_active": stream.get("isActive"),
+                    }
+                    if stream
+                    else None
+                ),
+            },
+        }
+    )
 
 
 @mcp.tool()
+@tool_errors
 async def review_recurring_stream(
     stream_id: str,
     review_status: str,
@@ -311,30 +309,27 @@ async def review_recurring_stream(
                 review_status="approved",
             )
     """
-    try:
-        client = await get_monarch_client()
-        result = await client.gql_call(
-            operation="Web_ReviewStream",
-            graphql_query=REVIEW_STREAM_MUTATION,
-            variables={
-                "input": {
-                    "streamId": stream_id,
-                    "reviewStatus": review_status,
-                }
-            },
-        )
-
-        errors = payload_errors(result, "reviewRecurringStream")
-        if errors:
-            return json_rejected("review_recurring_stream", errors)
-
-        stream = result.get("reviewRecurringStream", {}).get("stream", {})
-        return json_success(
-            {
-                "success": True,
-                "stream_id": stream.get("id"),
-                "review_status": stream.get("reviewStatus"),
+    client = await get_monarch_client()
+    result = await client.gql_call(
+        operation="Web_ReviewStream",
+        graphql_query=REVIEW_STREAM_MUTATION,
+        variables={
+            "input": {
+                "streamId": stream_id,
+                "reviewStatus": review_status,
             }
-        )
-    except Exception as e:
-        return json_error("review_recurring_stream", e)
+        },
+    )
+
+    errors = payload_errors(result, "reviewRecurringStream")
+    if errors:
+        return json_rejected("review_recurring_stream", errors)
+
+    stream = result.get("reviewRecurringStream", {}).get("stream", {})
+    return json_success(
+        {
+            "success": True,
+            "stream_id": stream.get("id"),
+            "review_status": stream.get("reviewStatus"),
+        }
+    )
