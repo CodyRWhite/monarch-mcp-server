@@ -2,8 +2,15 @@
 """
 Standalone script to perform interactive Monarch Money login.
 
-Supports three auth paths in order of recommendation:
+Supports four auth paths in order of recommendation:
 
+0. An embedded browser window (native WebView2/WebKit/WebKitGTK). Log in
+   normally -- SSO and MFA both just work, since it's a real browser engine
+   rendering Monarch's own page -- and the session cookies are captured
+   automatically once you're signed in. Requires the optional
+   `browser-login` extra (`pip install pywebview` /
+   `uv sync --extra browser-login`); falls back to option 1 with install
+   instructions if that isn't available on this machine.
 1. Session cookies pasted from a logged-in browser. Long-lived, works
    for all account types including SSO, sidesteps Cloudflare CAPTCHA.
 2. Email and password (with optional email OTP and MFA prompts). Now
@@ -44,6 +51,7 @@ def _use_utf8_console() -> None:
 _use_utf8_console()
 
 from monarchmoney import CaptchaRequiredException, RequireMFAException
+from monarch_mcp_server import browser_login
 from monarch_mcp_server.monarch_auth import (
     EmailOtpRequiredException,
     create_monarch_client,
@@ -159,6 +167,71 @@ async def _login_with_password():
         return mm
 
 
+def _prompt_yes_no(question: str) -> bool:
+    answer = input(f"{question} [y/N]: ").strip().lower()
+    return answer in ("y", "yes")
+
+
+async def _login_with_embedded_browser_window():
+    """Try the embedded browser window; return an authenticated client or None.
+
+    None here always means "fall back to the manual menu", not "login
+    failed and the whole script should exit" -- that distinction is what
+    lets main() drop straight into the existing option 1/2/3 menu instead
+    of just printing an error and quitting.
+    """
+    check = browser_login.check_prerequisites()
+    if not check.available:
+        print(f"\n⚠️  Can't open a sign-in window: {check.reason}.")
+        if check.can_auto_install and _prompt_yes_no(
+            "Try to install what's missing now?"
+        ):
+            browser_login.attempt_auto_install(check, confirm=_prompt_yes_no)
+            check = browser_login.check_prerequisites()
+        if not check.available:
+            if check.install_instructions:
+                print(f"\n{check.install_instructions}")
+            print("Falling back to the menu below.")
+            return None
+
+    print("\n🌐 Opening a sign-in window. Log in to Monarch normally; the")
+    print("   window will close on its own once you're signed in.")
+    cookie_string = browser_login.login_with_embedded_browser()
+    if not cookie_string:
+        print("❌ Sign-in window closed before completing login.")
+        return None
+    try:
+        mm = await login_with_browser_cookies(cookie_string)
+        print("✅ Browser sign-in successful")
+        return mm
+    except Exception as e:
+        print(f"❌ Login failed after sign-in window closed: {e}")
+        return None
+
+
+async def _dispatch_login_choice(choice: str):
+    if choice == "1":
+        return await _login_with_cookies()
+    if choice == "2":
+        return await _login_with_password()
+    if choice == "3":
+        return _login_with_legacy_token()
+    print(f"❌ Unrecognized choice: {choice!r}. Exiting.")
+    return None
+
+
+async def _run_manual_menu():
+    print("\nHow do you sign in to Monarch Money?")
+    print(
+        "  1) Session cookies from browser   "
+        "(recommended: long-lived, supports SSO)"
+    )
+    print("  2) Email and password")
+    print("  3) Legacy session token paste")
+    choice = input("Choice [1]: ").strip() or "1"
+    return await _dispatch_login_choice(choice)
+
+
 def _login_with_legacy_token():
     print("\n📋 To get a legacy session token:")
     print("  1. Log in to https://app.monarch.com in Chrome or Firefox")
@@ -204,23 +277,24 @@ async def main():
         # is stored, so nothing needs clearing first.
         print("\nHow do you sign in to Monarch Money?")
         print(
+            "  0) Open a sign-in window   "
+            "(recommended: no copy-pasting, handles SSO/MFA)"
+        )
+        print(
             "  1) Session cookies from browser   "
-            "(recommended: long-lived, supports SSO)"
+            "(manual paste -- fallback)"
         )
         print("  2) Email and password")
         print("  3) Legacy session token paste")
-        choice = input("Choice [1]: ").strip() or "1"
+        choice = input("Choice [0]: ").strip() or "0"
 
         mm = None
-        if choice == "1":
-            mm = await _login_with_cookies()
-        elif choice == "2":
-            mm = await _login_with_password()
-        elif choice == "3":
-            mm = _login_with_legacy_token()
+        if choice == "0":
+            mm = await _login_with_embedded_browser_window()
+            if mm is None:
+                mm = await _run_manual_menu()
         else:
-            print(f"❌ Unrecognized choice: {choice!r}. Exiting.")
-            return
+            mm = await _dispatch_login_choice(choice)
 
         if mm is None:
             return

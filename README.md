@@ -164,9 +164,22 @@ cd /path/to/your/monarch-mcp-server
 uv run python login_setup.py        # or: python login_setup.py
 ```
 
-The script offers three login paths:
+The script offers four login paths:
 
-#### Option 1 (recommended): Session cookies from your browser
+#### Option 0 (recommended): Sign-in window
+
+Opens a small native browser window (WebView2 on Windows, WebKit on macOS, WebKitGTK on Linux) pointed at Monarch's login page. Log in normally — SSO and MFA both just work, since it's a real browser engine rendering Monarch's own page — and the session cookies are captured automatically once you're signed in. No DevTools, no copy-pasting.
+
+Requires the optional `browser-login` extra:
+
+```bash
+uv sync --locked --extra browser-login
+# or: pip install pywebview
+```
+
+If it isn't installed (or, on Linux, if no GTK+WebKit2GTK/Qt+QtWebEngine toolkit is found underneath it), the script tells you what's missing, offers to install it for you — a plain `pip install pywebview` runs after a yes; a Linux system package install runs as its own separate confirmation, since that one needs `sudo` — and falls back to the option 1 menu below with instructions for installing it manually later.
+
+#### Option 1 (recommended fallback): Session cookies from your browser
 
 Long-lived sessions, supports SSO accounts, and sidesteps Cloudflare CAPTCHA gates on programmatic login. Steps:
 
