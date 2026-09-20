@@ -1,16 +1,8 @@
-[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/robcerda-monarch-mcp-server-badge.png)](https://mseep.ai/app/robcerda-monarch-mcp-server)
-
 # Monarch Money MCP Server
 
 A Model Context Protocol (MCP) server for integrating with the Monarch Money personal finance platform. This server provides seamless access to your financial accounts, transactions, budgets, and analytics through Claude Desktop and Claude Code.
 
-My MonarchMoney referral: https://www.monarchmoney.com/referral/ufmn0r83yf?r_source=share
-
-**Built with the [MonarchMoneyCommunity Python library](https://github.com/bradleyseanf/monarchmoneycommunity)** - An actively maintained community fork of the Monarch Money API with full MFA support.
-
-<a href="https://glama.ai/mcp/servers/@robcerda/monarch-mcp-server">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/@robcerda/monarch-mcp-server/badge" alt="monarch-mcp-server MCP server" />
-</a>
+**Built with the [MonarchMoneyCommunity Python library](https://github.com/bradleyseanf/monarchmoneycommunity)** - an actively maintained community fork of the Monarch Money API with full MFA support.
 
 ## 🚀 Quick Start
 
@@ -22,50 +14,32 @@ For other deployment scenarios - like containerized deployment or cloud hosting 
 
 1. **Clone this repository**:
    ```bash
-   git clone https://github.com/robcerda/monarch-mcp-server.git
+   git clone https://github.com/CodyRWhite/monarch-mcp-server.git
    cd monarch-mcp-server
    ```
 
 2. **Install dependencies**:
 
-   **Using `uv`** (recommended):
+   **Using `uv`** (recommended — install it from [astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/) if you don't have it):
    ```bash
    uv sync --locked
    ```
-
-   `--locked` installs exactly what `uv.lock` pins, verified against the
-   hashes it records, and refuses to re-resolve. Without it, `uv sync` is free
-   to pick up whatever versions happen to satisfy the ranges today.
+   `--locked` installs exactly what `uv.lock` pins (hash-verified) and refuses to silently re-resolve against PyPI — without it, a launch could pick up a newer, unreviewed dependency version.
 
    **Using `pip`**:
    ```bash
    pip install -r requirements-lock.txt --require-hashes
    pip install -e . --no-deps
    ```
+   `requirements-lock.txt` is generated from `uv.lock` and gives the pip path the same hash-pinned guarantee.
 
-   `requirements-lock.txt` is generated from `uv.lock` and pins every transitive
-   dependency with hashes, so `--require-hashes` gives the pip path the same
-   guarantee as the uv one. `--no-deps` on the second command stops pip
-   re-resolving what the first command just pinned.
-
-   `pip install -r requirements.txt` still works and installs exactly the same
-   set. That file is now a one line include of `requirements-lock.txt`, kept so
-   existing setups and scripts do not break. The pins moved out of it because a
-   root `requirements.txt` gets resolved as an independent manifest, which had
-   started producing a pinned set that disagreed with `uv.lock`.
-
-3. **Configure Claude Desktop**:
-   Add this to your Claude Desktop configuration file:
-
-   **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-
-   **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+3. **Configure your MCP client.** Add this to Claude Desktop's config (**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`; **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`) or to `.mcp.json` in your project for Claude Code:
 
    ```json
    {
      "mcpServers": {
        "Monarch Money": {
-         "command": "/opt/homebrew/bin/uv",
+         "command": "uv",
          "args": [
            "run",
            "--locked",
@@ -78,80 +52,11 @@ For other deployment scenarios - like containerized deployment or cloud hosting 
    }
    ```
 
-   **Important**: Replace `/path/to/your/monarch-mcp-server` with your actual path!
+   Replace `/path/to/your/monarch-mcp-server` with your actual path. If your client's subprocess launcher doesn't inherit your shell's `$PATH` (common for GUI apps), replace `"command": "uv"` with the absolute path from `which uv`.
 
-   `uv run --locked --project` resolves dependencies from the repo's
-   `uv.lock`, and `monarch-mcp-server` is the console script declared in
-   `pyproject.toml`. `--locked` matters: without it, a lockfile that has
-   drifted from `pyproject.toml` is silently re-resolved against PyPI and the
-   recorded hashes stop being enforced. With it, drift is a startup error.
-   Earlier versions of this README used `uv run --with 'mcp[cli]'`, which
-   builds a fresh unpinned environment on every launch and silently picks up
-   whatever the newest release happens to be. That is what broke every install
-   when the MCP SDK published 2.0, and the client only reported it as the
-   server disconnecting. Pinning the launch to the lockfile means a new
-   upstream release cannot change what your server runs.
+   Using `pip` instead of `uv`? Use `"command": "python"` and `"args": ["/path/to/your/monarch-mcp-server/src/monarch_mcp_server/server.py"]`.
 
-4. **Restart Claude Desktop**
-
-**OR**
-
-3. **Configure Claude Code** (CLI):
-   Add this to your Claude Code configuration file:
-
-   **Global** (all projects):
-
-   **macOS/Linux**: `~/.claude.json`
-
-   **Windows**: `%USERPROFILE%\.claude.json`
-
-   ```json
-   {
-     "mcpServers": {
-       "Monarch Money": {
-         "command": "/opt/homebrew/bin/uv",
-         "args": [
-           "run",
-           "--locked",
-           "--project",
-           "/path/to/your/monarch-mcp-server",
-           "monarch-mcp-server"
-         ]
-       }
-     }
-   }
-   ```
-
-   **Project-level** (specific directory):
-
-   Create `.mcp.json` in your project directory:
-
-   ```json
-   {
-     "Monarch Money": {
-       "command": "/opt/homebrew/bin/uv",
-       "args": [
-         "run",
-         "--locked",
-         "--project",
-         "/path/to/your/monarch-mcp-server",
-         "monarch-mcp-server"
-       ]
-     }
-   }
-   ```
-
-   **If installed via `pip`** instead of `uv`, use:
-   ```json
-   {
-     "command": "python",
-     "args": ["/path/to/your/monarch-mcp-server/src/monarch_mcp_server/server.py"]
-   }
-   ```
-
-   **Important**: Replace `/path/to/your/monarch-mcp-server` with your actual path!
-
-4. **Restart Claude Code**
+4. **Restart your MCP client.**
 
 ### 2. One-Time Authentication Setup
 
@@ -181,39 +86,16 @@ If it isn't installed (or, on Linux, if no GTK+WebKit2GTK/Qt+QtWebEngine toolkit
 
 #### Option 1 (recommended fallback): Session cookies from your browser
 
-Long-lived sessions, supports SSO accounts, and sidesteps Cloudflare CAPTCHA gates on programmatic login. Steps:
+Long-lived, supports SSO accounts, and sidesteps Cloudflare CAPTCHA gates on programmatic login.
 
 1. Log in to https://app.monarch.com in Chrome or Firefox.
-2. Open DevTools (F12) → Network tab.
-3. Click any request whose Name starts with `graphql` (or any request to `api.monarch.com`).
-4. Scroll to Request Headers, find the `cookie:` header, and copy the full value.
-5. Save it to the cookie file for your platform (recommended), then re-run the script — it reads the file automatically:
+2. Open DevTools (F12) → Network tab, click any request whose Name starts with `graphql` (or any request to `api.monarch.com`).
+3. Scroll to Request Headers, find the `cookie:` header, and copy the full value.
+4. Save it to the cookie file for your platform, then re-run the script — it reads the file automatically (pasting at the prompt instead can silently truncate on macOS/Linux terminals, so the file is the reliable path):
 
-   **macOS / Linux** — `~/.config/monarch-mcp/cookie.txt` (respects `$XDG_CONFIG_HOME`):
-
-   ```bash
-   mkdir -p ~/.config/monarch-mcp
-   # paste the cookie value into the file with your editor, then:
-   chmod 600 ~/.config/monarch-mcp/cookie.txt
-   ```
-
-   **Windows** — `%APPDATA%\monarch-mcp\cookie.txt`:
-
-   ```powershell
-   New-Item -ItemType Directory -Force "$env:APPDATA\monarch-mcp" | Out-Null
-   notepad "$env:APPDATA\monarch-mcp\cookie.txt"   # paste the cookie value, save, close
-   ```
-
-   Files under your user profile are already ACL-restricted to your account on Windows; no `chmod` equivalent is needed for typical single-user machines.
-
-   To use a different location on any platform, set the `MONARCH_MCP_COOKIE_FILE` environment variable to the full path.
-
-   Alternatively, paste the value at the interactive prompt — but note that
-   POSIX terminals silently truncate pasted input at the canonical-mode
-   buffer limit (`MAX_CANON`, 1024 bytes on macOS/Linux), and real Monarch
-   cookie headers are usually longer than that, so the prompt path fails
-   with a confusing auth error for most users. The cookie file has no
-   length limit and survives repo updates.
+   - **macOS / Linux**: `~/.config/monarch-mcp/cookie.txt` (respects `$XDG_CONFIG_HOME`) — `mkdir -p ~/.config/monarch-mcp && chmod 600 ~/.config/monarch-mcp/cookie.txt` after pasting the value in.
+   - **Windows**: `%APPDATA%\monarch-mcp\cookie.txt` — your user-profile ACLs already restrict it, no `chmod` equivalent needed.
+   - Override the location on any platform with the `MONARCH_MCP_COOKIE_FILE` environment variable.
 
 The script verifies the cookies against the live API before saving them to your system keyring. The cookie file is only read at setup time; the running MCP server uses the keyring session.
 
@@ -261,15 +143,7 @@ docker run --rm -it \
   monarch-mcp-server python login_setup.py
 ```
 
-The login script supports a cookie file for browser-cookie authentication.
-To use it, also mount your cookie file at `/tmp/monarch-cookie.txt:ro` and set `MONARCH_MCP_COOKIE_FILE=/tmp/monarch-cookie.txt` for the login container.
-
-The file must be readable by the container's uid `10001`, which conflicts with
-the `chmod 600` advised for the local flow: a 0600 file owned by your host user
-is not readable by uid 10001 inside the container. For the container login,
-either `chown 10001 cookie.txt` and keep it at 0600, or run the login container
-with `--user $(id -u)` so it reads the file as you. Do not widen it to 0644.
-Delete the file once the login has succeeded.
+For cookie-based login (option 1), mount your cookie file at `/tmp/monarch-cookie.txt:ro` and set `MONARCH_MCP_COOKIE_FILE=/tmp/monarch-cookie.txt` on the login container. The container's uid `10001` needs read access to it — either `chown 10001 cookie.txt` (keep it at mode 0600, don't widen it) or run the login container with `--user $(id -u)`. Delete the file once login succeeds.
 
 Once saved, the session volume is sufficient for normal server launches.
 
@@ -326,15 +200,9 @@ docker run -d --name monarch-mcp --restart unless-stopped \
   monarch-mcp-server
 ```
 
-Here a reverse proxy on the Docker host forwards `https://mcp.example.com/mcp` to `http://127.0.0.1:8000/mcp`, preserving the public Host header.
+A reverse proxy on the Docker host forwards `https://mcp.example.com/mcp` to `http://127.0.0.1:8000/mcp`, preserving the public Host header, and must support streaming responses without buffering. For direct access on a private network instead, allow the client's Host value including the port (e.g. `server.lan:8000`).
 
-The proxy must support streaming responses without buffering.
-For direct access on a private network, allow the client's Host value including the port, such as `server.lan:8000`.
-
-Let me stress this point: **This is a single-account server!**
-All connected clients share the *same* saved Monarch session and permissions, including enabled write tools.
-Basic Host/origin checks protect against DNS rebinding; they do not authenticate callers.
-Use one server and session volume per Monarch account if you need to.
+Host/origin checks protect against DNS rebinding; they do not authenticate callers, and all connected clients share the same saved Monarch session and write-tool access. Use one server and session volume per Monarch account if you need to.
 
 ### Use STDIO instead
 
@@ -371,98 +239,11 @@ Origin entries include the scheme, for example `https://client.example.com`.
 Clients without an Origin header are supported.
 Browser clients may additionally require CORS handling at the reverse proxy.
 
-## Meta Muse
-
-Works great with Meta Muse, Meta's AI assistant, alongside Claude Desktop and
-Claude Code. Muse speaks MCP, so it connects the same way as any other client:
-give it the stdio launch command from the installation section, or point it at
-the Streamable HTTP endpoint if you are running the container.
-
-Using Muse? Ask it to install this server from this repo. Muse can handle the
-install and register the server with itself, but authentication is a step only
-you can do: run login_setup.py once and paste a browser cookie, or enter your
-password and MFA. After that, ask Muse to list your Monarch accounts to confirm
-it is working.
-
-Check out Muse, your personal AI agent. Redeem my code in Settings within 48
-hours of joining and we'll both get 1 billion Muse tokens.
-
-Code: O63W0U
-
-https://muse.ai/join
-
 ## ✨ Features
 
-### 📊 Account Management
-- **Get Accounts**: View all linked financial accounts with balances and institution info
-- **Get Account Holdings**: See securities and investments in investment accounts
-- **Refresh Accounts**: Request real-time data updates from financial institutions
+Full read/write access to accounts, transactions, categories, tags, auto-categorization rules, merchants, recurring streams, splits, budgets, goals, and net worth — see [Available Tools](#️-available-tools) below for the complete list with parameters.
 
-### 💰 Transaction Access
-- **Get Transactions**: Fetch transaction data with filtering by date, account, and pagination
-- **Create Transaction**: Add new transactions to accounts
-- **Update Transaction**: Modify existing transactions (amount, description, category, date)
-
-### 🏷️ Category Management
-- **Get Categories**: List all transaction categories with groups, icons, and metadata
-- **Get Category Groups**: View category groups with their associated categories
-
-### 📋 Transaction Review
-- **Get Transactions Needing Review**: Find transactions that need attention (uncategorized, no notes, flagged)
-- **Set Transaction Category**: Assign a category to a transaction
-- **Update Transaction Notes**: Add or update notes on transactions (great for receipt links)
-- **Mark Transaction Reviewed**: Clear the needs_review flag on transactions
-
-### 📦 Bulk Operations
-- **Bulk Categorize Transactions**: Apply a category to multiple transactions at once
-
-### 🔖 Tag Management
-- **Get Tags**: List all available tags with colors and usage counts
-- **Set Transaction Tags**: Apply tags to a transaction
-- **Create Tag**: Create a new tag with custom name and color
-
-### 🔍 Advanced Search
-- **Search Transactions**: Comprehensive search with filters for merchant, category, account, tags, date ranges, and amounts
-- **Get Transaction Details**: Retrieve complete details for a single transaction
-- **Delete Transaction**: Remove a transaction
-- **Get Recurring Transactions**: View upcoming recurring transactions
-
-### 🤖 Transaction Rules (Auto-Categorization)
-- **Get Transaction Rules**: List all auto-categorization rules
-- **Create Transaction Rule**: Create rules with merchant/amount conditions to auto-categorize
-- **Update Transaction Rule**: Modify existing rules
-- **Delete Transaction Rule**: Remove a rule
-
-### 🔄 Merchant & Recurring Stream Management
-- **Get Merchant**: View a merchant's details including recurring transaction stream configuration
-- **Update Merchant**: Modify a merchant's name and/or recurring stream settings (frequency, amount, base date)
-- **Review Recurring Stream**: Accept, ignore, or reset recurring transaction streams detected by Monarch
-
-### ✂️ Transaction Splits
-- **Get Transaction Splits**: View how a transaction has been split into parts
-- **Split Transaction**: Divide a single transaction into multiple parts with different categories or merchants
-
-### 💵 Budget Management
-- **Get Budgets**: Access budget information including spent amounts and remaining balances by category
-- **Set Budget Amount**: Create or modify budget amounts for any category or category group
-
-### 📈 Net Worth Tracking
-- **Get Net Worth**: Track total net worth over time with daily snapshots and trend analysis
-- **Get Account Balance History**: View historical balance data for any account
-- **Get Net Worth by Account Type**: See net worth breakdown across account types (checking, savings, investments, etc.)
-
-### 📊 Financial Analysis
-- **Get Cashflow**: Analyze financial cashflow over specified date ranges with income/expense breakdowns
-- **Get Transactions Summary**: Quick high-level statistics about your transactions
-- **Get Spending Summary**: Spending breakdown by category with totals
-
-### 🔐 Secure Authentication
-- **One-Time Setup**: Authenticate once, use for weeks/months
-- **Email OTP Support**: Handles Monarch's email verification flow for new devices/sessions
-- **MFA Support**: Full support for two-factor authentication
-- **SSO/Google sign-in**: Use `monarch_login_with_token` to paste a session token from your browser
-- **Session Persistence**: No need to re-authenticate frequently
-- **Secure**: Credentials never pass through Claude
+Authentication is one-time: sign in via the [sign-in window](#option-0-recommended-sign-in-window) (SSO and MFA both just work) or the cookie/password/token fallbacks, and the session persists in your system keyring across restarts — credentials never pass through Claude itself.
 
 ## 🛠️ Available Tools
 
@@ -533,112 +314,20 @@ live tool registry and the functions' signatures, so it does not drift.
 
 ## 📝 Usage Examples
 
-### View Your Accounts
+Just describe what you want in plain language — the model picks the tool. A few examples across the range of what's available:
+
 ```
-Use get_accounts to show me all my financial accounts
+Show me all my financial accounts
+Show me my last 50 transactions and flag anything that needs review
+Set my grocery budget to $600 for this month and apply it to all future months
+Show my net worth trend for the past year, broken down by account type
+Find all Amazon transactions from last month and categorize them as Shopping
+Create a rule to auto-categorize Netflix as Shopping, then split this $100 Costco charge into $60 Groceries / $40 Household
 ```
 
-### Get Recent Transactions
-```
-Show me my last 50 transactions using get_transactions with limit 50
-```
+`get_transactions`/`search_transactions` return a self-describing envelope (`tool`, `args`, `count`, `total_count`, `truncated`, `search`, `data`) rather than a bare list, so a truncated result is visible rather than silently mistaken for the full set. When Monarch's server-side search errors or returns nothing, `wide_search` scans recent transactions locally across merchant, statement text, notes, category, account, and tags instead.
 
-`get_transactions` returns a JSON object with `tool`, `args`, `count`, `total_count`, `truncated`, `search`, and `data` so large `agent-tools/<uuid>.txt` responses are self-describing. Transaction rows live in `data` and include `original_statement` / `plaid_description` when Monarch provides the underlying Plaid statement text, plus `currency`, `direction`, `direction_source`, `transaction_type`, `category_group`, and `category_group_id` when those values can be derived from Monarch response data. When Monarch's server-side `search` errors or returns no rows, `wide_search` scans recent transactions locally across merchant, original statement, description, notes, category, account, and tags.
-
-### Check Spending vs Budget
-```
-Use get_budgets to show my current budget status
-```
-
-### Set a Budget Amount
-```
-Set my grocery budget to $600 for this month using set_budget_amount
-```
-
-### Apply Budget to All Future Months
-```
-Set my entertainment budget to $150 and apply it to all future months using set_budget_amount with apply_to_future=true
-```
-
-### Track Net Worth Over Time
-```
-Show my net worth trend for the past year using get_net_worth
-```
-
-### View Account Balance History
-```
-Show me how my savings account balance has changed over time using get_account_balance_history
-```
-
-### Net Worth Breakdown by Account Type
-```
-Show my net worth breakdown by account type using get_net_worth_by_account_type
-```
-
-### Analyze Cash Flow
-```
-Get my cashflow for the last 3 months using get_cashflow
-```
-
-### List Available Categories
-```
-Show me all available categories using get_transaction_categories
-```
-
-### Review Uncategorized Transactions
-```
-Show me transactions from the last 7 days that need review using get_transactions_needing_review
-```
-
-### Bulk Categorize Transactions
-```
-Categorize these three transactions as "Groceries" using bulk_categorize_transactions
-```
-
-### Tag a Transaction
-```
-Add the "Tax Deductible" tag to this transaction using set_transaction_tags
-```
-
-### Search for Transactions
-```
-Find all Amazon transactions from the last month using search_transactions
-```
-
-### View Recurring Bills
-```
-Show me my upcoming recurring transactions using get_recurring_transactions
-```
-
-### Create Auto-Categorization Rule
-```
-Create a rule to automatically categorize Amazon transactions as "Shopping" using create_transaction_rule
-```
-
-### Split a Transaction
-```
-Split this $100 Costco transaction into $60 for Groceries and $40 for Household using split_transaction
-```
-
-### Get Transaction Statistics
-```
-Give me a quick summary of my transactions using get_transactions_summary
-```
-
-### View Spending by Category
-```
-Show my spending breakdown by category for last month using get_spending_summary
-```
-
-### Update a Recurring Bill Amount
-```
-Update PennyMac's recurring stream to $1,460.93 monthly using update_merchant
-```
-
-### Review Recurring Streams
-```
-Approve the Netflix recurring stream using review_recurring_stream
-```
+See [Available Tools](#️-available-tools) above for every tool's exact parameters.
 
 ## 📅 Date Formats
 
@@ -660,10 +349,10 @@ Monarch may require an email one-time code for a new device or session, even if 
 3. Let the script finish so it can save the reusable token to your system keyring
 
 ### Session Expired or 401 within an hour
-If your session dies quickly (under a couple of hours), the most common cause is that Monarch returned a short-lived token. The login script now requests `trusted_device=True` and rejects any short-lived token, so a fresh login produces a long-lived session. If you re-run `login_setup.py` and the issue persists, switch to option 1 (browser cookies); cookie sessions track the lifetime of the underlying browser login.
+If your session dies quickly (under a couple of hours), the most common cause is that Monarch returned a short-lived token. The login script now requests `trusted_device=True` and rejects any short-lived token, so a fresh login produces a long-lived session. If you re-run `login_setup.py` and the issue persists, switch to option 0 (sign-in window) or option 1 (browser cookies); both track the lifetime of the underlying browser login rather than a token Monarch can expire early.
 
 ### Cloudflare CAPTCHA on login
-If `login_setup.py` reports "Programmatic login is blocked by Cloudflare CAPTCHA", choose option 1 (browser cookies) instead. Email/password POSTs to Monarch's login endpoint are sometimes gated by Cloudflare for unfamiliar IPs or rapid retries; cookie-based auth bypasses that endpoint entirely.
+If `login_setup.py` reports "Programmatic login is blocked by Cloudflare CAPTCHA", choose option 0 (sign-in window) or option 1 (browser cookies) instead. Email/password POSTs to Monarch's login endpoint are sometimes gated by Cloudflare for unfamiliar IPs or rapid retries; both cookie-based paths bypass that endpoint entirely by using a real browser to sign in instead.
 
 ### `'Context' object has no attribute 'elicit'`
 The `monarch_login` and `monarch_login_with_token` tools require the MCP Python SDK 1.10.0 or newer (released June 2025). If your environment cached an older `mcp` install, refresh it:
@@ -688,8 +377,12 @@ monarch-mcp-server/
 ├── src/monarch_mcp_server/
 │   ├── __init__.py
 │   ├── app.py             # FastMCP app instance and entry point
+│   ├── auth.py             # Elicitation-based login tools (monarch_login, monarch_logout)
+│   ├── browser_login.py   # Embedded-browser sign-in window (optional, login_setup.py only)
 │   ├── client.py          # Cached MonarchMoney client factory
+│   ├── helpers.py          # Shared tool helpers (error/response formatting, date normalization)
 │   ├── monarch_auth.py    # Current Monarch auth compatibility (host, email OTP, device-uuid)
+│   ├── read_only.py        # MONARCH_MCP_READ_ONLY gate: unregisters mutating tools
 │   ├── secure_session.py  # Keyring-backed token storage (file fallback)
 │   ├── server.py          # Backward-compatibility shim re-exporting the tools
 │   └── tools/             # MCP tools grouped by domain (accounts, transactions, budgets, …)
@@ -725,7 +418,7 @@ tool that is not there.
 {
   "mcpServers": {
     "Monarch Money": {
-      "command": "/opt/homebrew/bin/uv",
+      "command": "uv",
       "args": ["run", "--project", "/path/to/your/monarch-mcp-server", "monarch-mcp-server"],
       "env": { "MONARCH_MCP_READ_ONLY": "1" }
     }
