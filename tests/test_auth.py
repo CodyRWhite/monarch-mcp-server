@@ -42,7 +42,7 @@ def no_session_save():
 class TestLoginInteractive:
     def test_happy_path_no_mfa(self, no_session_save):
         mm = AsyncMock()
-        with patch("monarch_mcp_server.auth.MonarchMoney", return_value=mm):
+        with patch("monarch_mcp_server.auth.create_monarch_client", return_value=mm):
             ctx = make_ctx(accept(email="a@b.com", password="pw"))
             result = asyncio.run(auth.login_interactive(ctx))
         assert "Logged in" in result
@@ -52,7 +52,7 @@ class TestLoginInteractive:
     def test_mfa_required(self, no_session_save):
         mm = AsyncMock()
         mm.login.side_effect = RequireMFAException("mfa")
-        with patch("monarch_mcp_server.auth.MonarchMoney", return_value=mm):
+        with patch("monarch_mcp_server.auth.create_monarch_client", return_value=mm):
             ctx = make_ctx(
                 accept(email="a@b.com", password="pw"),
                 accept(mfa_code="123456"),
@@ -73,7 +73,7 @@ class TestLoginInteractive:
     def test_user_cancels_mfa(self, no_session_save):
         mm = AsyncMock()
         mm.login.side_effect = RequireMFAException("mfa")
-        with patch("monarch_mcp_server.auth.MonarchMoney", return_value=mm):
+        with patch("monarch_mcp_server.auth.create_monarch_client", return_value=mm):
             ctx = make_ctx(accept(email="a@b.com", password="pw"), cancel())
             result = asyncio.run(auth.login_interactive(ctx))
         assert result == "Login cancelled."
@@ -83,19 +83,25 @@ class TestLoginInteractive:
 class TestLoginWithTokenInteractive:
     def test_happy_path(self, no_session_save):
         mm = AsyncMock()
-        with patch("monarch_mcp_server.auth.MonarchMoney", return_value=mm):
+        mm._headers = {"device-uuid": "device-abc"}
+        with patch("monarch_mcp_server.auth.create_monarch_client", return_value=mm):
             ctx = make_ctx(accept(token="raw-token"))
             result = asyncio.run(auth.login_with_token_interactive(ctx))
         assert "saved" in result.lower()
         mm.get_subscription_details.assert_awaited_once()
-        no_session_save.save_token.assert_called_once_with("raw-token")
+        no_session_save.save_token.assert_called_once_with(
+            "raw-token", device_uuid="device-abc"
+        )
 
     def test_strips_whitespace(self, no_session_save):
         mm = AsyncMock()
-        with patch("monarch_mcp_server.auth.MonarchMoney", return_value=mm):
+        mm._headers = {"device-uuid": "device-abc"}
+        with patch("monarch_mcp_server.auth.create_monarch_client", return_value=mm):
             ctx = make_ctx(accept(token="  token-with-spaces  "))
             asyncio.run(auth.login_with_token_interactive(ctx))
-        no_session_save.save_token.assert_called_once_with("token-with-spaces")
+        no_session_save.save_token.assert_called_once_with(
+            "token-with-spaces", device_uuid="device-abc"
+        )
 
     def test_empty_token_rejected(self, no_session_save):
         ctx = make_ctx(accept(token="   "))
@@ -136,7 +142,7 @@ class TestClientCacheInvalidation:
 
         client_module._cached_client = object()
         mm = AsyncMock()
-        with patch("monarch_mcp_server.auth.MonarchMoney", return_value=mm):
+        with patch("monarch_mcp_server.auth.create_monarch_client", return_value=mm):
             ctx = make_ctx(accept(email="a@b.com", password="pw"))
             asyncio.run(auth.login_interactive(ctx))
         assert client_module._cached_client is None
@@ -146,7 +152,7 @@ class TestClientCacheInvalidation:
 
         client_module._cached_client = object()
         mm = AsyncMock()
-        with patch("monarch_mcp_server.auth.MonarchMoney", return_value=mm):
+        with patch("monarch_mcp_server.auth.create_monarch_client", return_value=mm):
             ctx = make_ctx(accept(token="fresh-token"))
             asyncio.run(auth.login_with_token_interactive(ctx))
         assert client_module._cached_client is None
