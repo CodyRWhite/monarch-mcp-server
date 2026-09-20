@@ -7,7 +7,12 @@ from gql import gql
 
 from monarch_mcp_server.app import mcp
 from monarch_mcp_server.client import get_monarch_client
-from monarch_mcp_server.helpers import json_error, json_success
+from monarch_mcp_server.helpers import (
+    json_error,
+    json_rejected,
+    json_success,
+    payload_errors,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -248,9 +253,9 @@ async def update_merchant(
             variables={"input": merchant_input},
         )
 
-        errors = result.get("updateMerchant", {}).get("errors")
+        errors = payload_errors(result, "updateMerchant")
         if errors:
-            return json_success({"success": False, "errors": errors})
+            return json_rejected("update_merchant", errors)
 
         merchant = result.get("updateMerchant", {}).get("merchant", {})
         stream = merchant.get("recurringTransactionStream")
@@ -319,9 +324,9 @@ async def review_recurring_stream(
             },
         )
 
-        errors = result.get("reviewRecurringStream", {}).get("errors")
+        errors = payload_errors(result, "reviewRecurringStream")
         if errors:
-            return json_success({"success": False, "errors": errors})
+            return json_rejected("review_recurring_stream", errors)
 
         stream = result.get("reviewRecurringStream", {}).get("stream", {})
         return json_success(

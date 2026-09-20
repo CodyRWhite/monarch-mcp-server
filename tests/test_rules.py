@@ -234,6 +234,9 @@ class TestCreateTransactionRule:
         data = json.loads(result)
         assert data["success"] is False
         assert data["errors"] is not None
+        # Must go through the shared json_rejected convention like every
+        # other mutating tool, not the bespoke _meaningful_errors path.
+        assert data["tool"] == "create_transaction_rule"
 
     @patch('monarch_mcp_server.tools.rules.get_monarch_client')
     async def test_create_rule_with_multiple_merchant_values(self, mock_get_client):
@@ -433,6 +436,7 @@ class TestUpdateTransactionRule:
 
         data = json.loads(result)
         assert data["success"] is False
+        assert data["tool"] == "update_transaction_rule"
 
     @patch('monarch_mcp_server.tools.rules.get_monarch_client')
     async def test_update_rule_with_multiple_merchant_values(self, mock_get_client):
@@ -671,6 +675,7 @@ class TestDeleteTransactionRule:
 
         data = json.loads(result)
         assert data["success"] is False
+        assert data["tool"] == "delete_transaction_rule"
 
     @patch('monarch_mcp_server.tools.rules.get_monarch_client')
     async def test_delete_rule_error(self, mock_get_client):

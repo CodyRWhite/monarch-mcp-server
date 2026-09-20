@@ -305,23 +305,6 @@ def _build_amount_criteria(
     return None
 
 
-def _meaningful_errors(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Return a useful error payload, or None if there was no real error.
-
-    Monarch rejects some inputs with ``{fieldErrors: null, message: null,
-    code: null}`` -- truthy, but carrying no information. Reporting that
-    verbatim tells the caller nothing, so it is replaced with a plain message.
-    """
-    if not payload:
-        return None
-    meaningful = {
-        k: v for k, v in payload.items() if k != "__typename" and v is not None
-    }
-    return meaningful or {
-        "message": "Monarch rejected the request without giving a reason"
-    }
-
-
 async def _fetch_rule(client, rule_id: str) -> Optional[Dict[str, Any]]:
     """Fetch a single rule by id, or None if it does not exist."""
     result = await client.gql_call(
@@ -533,9 +516,9 @@ async def create_transaction_rule(
         )
 
         payload = result.get("createTransactionRuleV2") or {}
-        errors = _meaningful_errors(payload.get("errors"))
+        errors = payload_errors(result, "createTransactionRuleV2")
         if errors:
-            return json_success({"success": False, "errors": errors})
+            return json_rejected("create_transaction_rule", errors)
 
         rule = payload.get("transactionRule") or {}
         return json_success({
@@ -823,10 +806,9 @@ async def update_transaction_rule(
             variables={"input": rule_input},
         )
 
-        payload = result.get("updateTransactionRuleV2") or {}
-        errors = _meaningful_errors(payload.get("errors"))
+        errors = payload_errors(result, "updateTransactionRuleV2")
         if errors:
-            return json_success({"success": False, "errors": errors})
+            return json_rejected("update_transaction_rule", errors)
 
         return json_success({
             "success": True,
@@ -867,11 +849,9 @@ async def delete_transaction_rule(rule_id: str) -> str:
         # GraphQL layer, which the except block below turns into an error result.
         # So the only in-payload failure signal worth honouring is an explicit
         # `errors` object.
-        delete_result = result.get("deleteTransactionRule") or {}
-
-        errors = delete_result.get("errors")
+        errors = payload_errors(result, "deleteTransactionRule")
         if errors:
-            return json_success({"success": False, "errors": errors})
+            return json_rejected("delete_transaction_rule", errors)
 
         return json_success({"success": True, "message": "Rule deleted successfully"})
     except Exception as e:
