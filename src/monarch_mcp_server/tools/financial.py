@@ -1,7 +1,6 @@
 """Financial analytics tools (cashflow, net worth)."""
 
 import logging
-from datetime import datetime as dt
 from typing import Any, Dict, Optional
 
 from monarch_mcp_server.app import mcp
@@ -79,10 +78,18 @@ async def get_net_worth(
         result = await client.get_aggregate_snapshots(**params)
 
         snapshots = result.get("aggregateSnapshots", [])
+        # Cap the payload returned to the caller, but every stat below is
+        # computed from the full `snapshots` list so it always describes the
+        # whole requested range, not just the returned page. snapshots_truncated
+        # tells the caller when those two things diverge, so a stat like
+        # earliest_net_worth isn't mistaken for something present in `snapshots`.
+        max_snapshots_returned = 365
+        returned_snapshots = snapshots[-max_snapshots_returned:]
 
         formatted: Dict[str, Any] = {
             "snapshot_count": len(snapshots),
-            "snapshots": []
+            "snapshots_truncated": len(snapshots) > len(returned_snapshots),
+            "snapshots": [],
         }
 
         if snapshots:
@@ -98,7 +105,7 @@ async def get_net_worth(
                 formatted["highest"] = max(values)
                 formatted["lowest"] = min(values)
 
-        for snapshot in snapshots[-365:]:
+        for snapshot in returned_snapshots:
             formatted["snapshots"].append({
                 "date": snapshot.get("date"),
                 "net_worth": snapshot.get("balance"),
