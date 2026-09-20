@@ -679,7 +679,14 @@ def _module_from(fake, **overrides):
 
 @pytest.fixture
 def file_session(monkeypatch, tmp_path):
-    """A session forced onto the file fallback, sandboxed to tmp_path."""
+    """A session forced onto the file fallback, sandboxed to tmp_path.
+
+    Platform is forced to a non-macOS value: macOS refuses the plaintext
+    file fallback entirely (see TestMacOSKeychainEnforcement), so these
+    generic fallback-behavior tests exercise the Windows/Linux path they
+    were written for regardless of which OS actually runs the suite.
+    """
+    monkeypatch.setattr(ss_module.sys, "platform", "linux")
     monkeypatch.setattr(ss_module, "_keyring_available", lambda: False)
     monkeypatch.setattr(ss_module, "_TOKEN_DIR", tmp_path / "store")
     monkeypatch.setattr(ss_module, "_TOKEN_FILE", tmp_path / "store" / "token")
@@ -837,6 +844,102 @@ class TestCorruptedSessionHandling:
         token_file.write_text("x" * 5000)
 
         assert session.load_session() is None
+
+
+class TestMacOSKeychainEnforcement:
+    """On macOS, a session must never silently fall back to an unencrypted
+    file. Keychain access is expected to always work there, so a failure is
+    treated as something to surface and fix, not paper over."""
+
+    def test_raises_when_keyring_unavailable_at_init(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(ss_module.sys, "platform", "darwin")
+        monkeypatch.setattr(ss_module, "_keyring_available", lambda: False)
+        monkeypatch.setattr(ss_module, "_TOKEN_DIR", tmp_path / "store")
+        monkeypatch.setattr(ss_module, "_TOKEN_FILE", tmp_path / "store" / "token")
+
+        session = ss_module.SecureMonarchSession()
+        assert session._use_keyring is False
+
+        with pytest.raises(RuntimeError, match="Keychain"):
+            session.save_session_blob(token="tok", auth_mode="token")
+
+        assert not (tmp_path / "store" / "token").exists()
+
+    def test_raises_when_keyring_save_fails_after_init_succeeded(
+        self, monkeypatch, tmp_path
+    ):
+        """Even when the startup probe passed, a later save failure must not
+        drop to plaintext on macOS."""
+        monkeypatch.setattr(ss_module.sys, "platform", "darwin")
+        monkeypatch.setattr(ss_module, "_TOKEN_DIR", tmp_path / "store")
+        monkeypatch.setattr(ss_module, "_TOKEN_FILE", tmp_path / "store" / "token")
+
+        fake = _StorageFakeKeyring()
+        module = types.ModuleType("keyring")
+        module.set_password = fake.set_password
+        module.get_password = fake.get_password
+        module.delete_password = fake.delete_password
+        monkeypatch.setitem(sys.modules, "keyring", module)
+
+        session = ss_module.SecureMonarchSession()
+        assert session._use_keyring is True
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("Keychain locked")
+
+        monkeypatch.setattr(session, "_keyring_save", boom)
+
+        with pytest.raises(RuntimeError, match="Keychain locked"):
+            session.save_session_blob(token="tok", auth_mode="token")
+
+        assert not (tmp_path / "store" / "token").exists()
+
+    def test_non_macos_still_falls_back_to_file(self, monkeypatch, tmp_path):
+        """The guard is macOS-specific; other platforms keep the existing
+        plaintext fallback behavior unchanged."""
+        monkeypatch.setattr(ss_module.sys, "platform", "linux")
+        monkeypatch.setattr(ss_module, "_keyring_available", lambda: False)
+        monkeypatch.setattr(ss_module, "_TOKEN_DIR", tmp_path / "store")
+        monkeypatch.setattr(ss_module, "_TOKEN_FILE", tmp_path / "store" / "token")
+
+        session = ss_module.SecureMonarchSession()
+        session.save_session_blob(token="tok", auth_mode="token")
+
+        assert (tmp_path / "store" / "token").exists()
+        assert session.load_session()["token"] == "tok"
+
+    def test_plaintext_file_is_migrated_to_keychain_on_load(
+        self, monkeypatch, tmp_path
+    ):
+        """A plaintext file left over from before this change (or written
+        while Keychain was briefly unreachable) is moved into the keyring
+        and removed from disk the next time it is loaded successfully."""
+        monkeypatch.setattr(ss_module.sys, "platform", "darwin")
+        monkeypatch.setattr(ss_module, "_TOKEN_DIR", tmp_path / "store")
+        monkeypatch.setattr(ss_module, "_TOKEN_FILE", tmp_path / "store" / "token")
+
+        fake = _StorageFakeKeyring()
+        module = types.ModuleType("keyring")
+        module.set_password = fake.set_password
+        module.get_password = fake.get_password
+        module.delete_password = fake.delete_password
+        monkeypatch.setitem(sys.modules, "keyring", module)
+
+        session = ss_module.SecureMonarchSession()
+        assert session._use_keyring is True
+
+        token_file = tmp_path / "store" / "token"
+        token_file.parent.mkdir(parents=True, exist_ok=True)
+        blob = json.dumps({"token": "legacy-plaintext", "auth_mode": "token"})
+        ss_module._write_secret_file(token_file, blob)
+
+        loaded = session.load_session()
+        assert loaded["token"] == "legacy-plaintext"
+        assert not token_file.exists()
+        assert (
+            fake.get_password(ss_module.KEYRING_SERVICE, ss_module.KEYRING_USERNAME)
+            == blob
+        )
 
 
 class TestGetAuthenticatedClient:

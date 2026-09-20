@@ -688,6 +688,7 @@ monarch-mcp-server/
 
 ### Session Management
 - Session tokens are stored securely in the system keyring (with an automatic file fallback for environments without a keyring backend)
+- On macOS, that fallback is disabled: Keychain access is expected to always work there, so a save or load that can't reach it fails loudly instead of writing an unencrypted file. A plaintext file left over from an older install is migrated into Keychain and deleted the next time it's loaded successfully.
 - The `device-uuid` captured at login is stored alongside the token so it reloads cleanly
 - Sessions persist across Claude Desktop and Claude Code restarts
 - No need for frequent re-authentication
@@ -696,7 +697,7 @@ monarch-mcp-server/
 - Credentials never transmitted through Claude Desktop or Claude Code
 - MFA/2FA fully supported
 - Email verification codes are handled only in the terminal setup script
-- Session tokens are stored in the system keyring
+- Session tokens are stored in the system keyring — on macOS, only the keyring; the plaintext file fallback used on other platforms is refused
 - Authentication handled in secure terminal environment
 
 ### Strongest option: read only mode

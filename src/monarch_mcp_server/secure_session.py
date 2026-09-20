@@ -128,6 +128,11 @@ def _dpapi_decrypt(payload: str) -> str:
     return decoded
 
 
+def _is_macos() -> bool:
+    """True on macOS, where Keychain access is expected to always work."""
+    return sys.platform == "darwin"
+
+
 def _keyring_available() -> bool:
     """Probe whether the active keyring backend can actually round-trip a value.
 
@@ -323,6 +328,14 @@ class SecureMonarchSession:
         self._use_keyring = _keyring_available()
         if self._use_keyring:
             logger.info("🔐 Using system keyring for token storage")
+        elif _is_macos():
+            logger.error(
+                "🔐 macOS Keychain is unavailable to this process. Sessions "
+                "cannot be saved until this is fixed — the plaintext file "
+                "fallback is disabled on macOS. Check Keychain Access / "
+                "System Settings → Privacy & Security for this app, then "
+                "restart the server."
+            )
         else:
             logger.info("🔐 Keyring unavailable — using file-based token storage")
 
@@ -373,6 +386,18 @@ class SecureMonarchSession:
                 logger.info("🔐 Migrated plaintext token file to DPAPI-encrypted at rest")
             except Exception as e:
                 logger.warning(f"⚠️  Could not migrate token file to encrypted: {e}")
+        elif _is_macos() and self._use_keyring:
+            # A plaintext file on macOS predates this Keychain-enforcement
+            # change (or was written while Keychain was temporarily
+            # unreachable). Now that the keyring is working, move the
+            # session there and remove the file rather than leaving a
+            # plaintext copy on disk indefinitely.
+            try:
+                self._keyring_save(raw)
+                self._delete_token_file()
+                logger.info("🔐 Migrated plaintext token file to macOS Keychain")
+            except Exception as e:
+                logger.warning(f"⚠️  Could not migrate token file to Keychain: {e}")
         return raw
 
     def _delete_token_file(self) -> None:
@@ -544,7 +569,22 @@ class SecureMonarchSession:
                 self._cleanup_old_session_files()
                 return
             except Exception as e:
+                if _is_macos():
+                    logger.error(
+                        "❌ Keychain save failed on macOS (%s). Refusing to "
+                        "fall back to an unencrypted file — grant this "
+                        "process Keychain access and retry.",
+                        e,
+                    )
+                    raise
                 logger.warning(f"⚠️  Keyring save failed, falling back to file: {e}")
+        elif _is_macos():
+            raise RuntimeError(
+                "System keyring (macOS Keychain) is unavailable, and macOS "
+                "installs refuse to store the session as an unencrypted "
+                "file. Ensure the `keyring` package is installed and "
+                "Keychain access works for this process, then retry."
+            )
 
         self._save_token_file(blob)
         self._cleanup_old_session_files()
