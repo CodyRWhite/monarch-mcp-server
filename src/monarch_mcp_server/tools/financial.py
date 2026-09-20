@@ -5,12 +5,13 @@ from typing import Any, Dict, Optional
 
 from monarch_mcp_server.app import mcp
 from monarch_mcp_server.client import get_monarch_client
-from monarch_mcp_server.helpers import json_success, json_error
+from monarch_mcp_server.helpers import tool_errors, json_success, json_error
 
 logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
+@tool_errors
 async def get_cashflow(
     start_date: Optional[str] = None, end_date: Optional[str] = None
 ) -> str:
@@ -21,22 +22,20 @@ async def get_cashflow(
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
     """
-    try:
-        client = await get_monarch_client()
+    client = await get_monarch_client()
 
-        filters: Dict[str, Any] = {}
-        if start_date:
-            filters["start_date"] = start_date
-        if end_date:
-            filters["end_date"] = end_date
+    filters: Dict[str, Any] = {}
+    if start_date:
+        filters["start_date"] = start_date
+    if end_date:
+        filters["end_date"] = end_date
 
-        cashflow = await client.get_cashflow(**filters)
-        return json_success(cashflow)
-    except Exception as e:
-        return json_error("get_cashflow", e)
+    cashflow = await client.get_cashflow(**filters)
+    return json_success(cashflow)
 
 
 @mcp.tool()
+@tool_errors
 async def get_net_worth(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -62,61 +61,59 @@ async def get_net_worth(
         Get only investment account net worth:
             get_net_worth(account_type="brokerage")
     """
-    try:
-        client = await get_monarch_client()
+    client = await get_monarch_client()
 
-        params: Dict[str, Any] = {}
-        # Pass ISO strings directly; upstream serializes via gql JSON and
-        # cannot handle datetime.date objects in GraphQL variables.
-        if start_date:
-            params["start_date"] = start_date
-        if end_date:
-            params["end_date"] = end_date
-        if account_type:
-            params["account_type"] = account_type
+    params: Dict[str, Any] = {}
+    # Pass ISO strings directly; upstream serializes via gql JSON and
+    # cannot handle datetime.date objects in GraphQL variables.
+    if start_date:
+        params["start_date"] = start_date
+    if end_date:
+        params["end_date"] = end_date
+    if account_type:
+        params["account_type"] = account_type
 
-        result = await client.get_aggregate_snapshots(**params)
+    result = await client.get_aggregate_snapshots(**params)
 
-        snapshots = result.get("aggregateSnapshots", [])
-        # Cap the payload returned to the caller, but every stat below is
-        # computed from the full `snapshots` list so it always describes the
-        # whole requested range, not just the returned page. snapshots_truncated
-        # tells the caller when those two things diverge, so a stat like
-        # earliest_net_worth isn't mistaken for something present in `snapshots`.
-        max_snapshots_returned = 365
-        returned_snapshots = snapshots[-max_snapshots_returned:]
+    snapshots = result.get("aggregateSnapshots", [])
+    # Cap the payload returned to the caller, but every stat below is
+    # computed from the full `snapshots` list so it always describes the
+    # whole requested range, not just the returned page. snapshots_truncated
+    # tells the caller when those two things diverge, so a stat like
+    # earliest_net_worth isn't mistaken for something present in `snapshots`.
+    max_snapshots_returned = 365
+    returned_snapshots = snapshots[-max_snapshots_returned:]
 
-        formatted: Dict[str, Any] = {
-            "snapshot_count": len(snapshots),
-            "snapshots_truncated": len(snapshots) > len(returned_snapshots),
-            "snapshots": [],
-        }
+    formatted: Dict[str, Any] = {
+        "snapshot_count": len(snapshots),
+        "snapshots_truncated": len(snapshots) > len(returned_snapshots),
+        "snapshots": [],
+    }
 
-        if snapshots:
-            values = [s.get("balance", 0) for s in snapshots if s.get("balance") is not None]
-            if values:
-                formatted["current_net_worth"] = values[-1] if values else 0
-                formatted["earliest_net_worth"] = values[0] if values else 0
-                formatted["change"] = values[-1] - values[0] if len(values) > 1 else 0
-                formatted["change_percent"] = (
-                    ((values[-1] - values[0]) / values[0] * 100)
-                    if values[0] != 0 and len(values) > 1 else 0
-                )
-                formatted["highest"] = max(values)
-                formatted["lowest"] = min(values)
+    if snapshots:
+        values = [s.get("balance", 0) for s in snapshots if s.get("balance") is not None]
+        if values:
+            formatted["current_net_worth"] = values[-1] if values else 0
+            formatted["earliest_net_worth"] = values[0] if values else 0
+            formatted["change"] = values[-1] - values[0] if len(values) > 1 else 0
+            formatted["change_percent"] = (
+                ((values[-1] - values[0]) / values[0] * 100)
+                if values[0] != 0 and len(values) > 1 else 0
+            )
+            formatted["highest"] = max(values)
+            formatted["lowest"] = min(values)
 
-        for snapshot in returned_snapshots:
-            formatted["snapshots"].append({
-                "date": snapshot.get("date"),
-                "net_worth": snapshot.get("balance"),
-            })
+    for snapshot in returned_snapshots:
+        formatted["snapshots"].append({
+            "date": snapshot.get("date"),
+            "net_worth": snapshot.get("balance"),
+        })
 
-        return json_success(formatted)
-    except Exception as e:
-        return json_error("get_net_worth", e)
+    return json_success(formatted)
 
 
 @mcp.tool()
+@tool_errors
 async def get_net_worth_by_account_type(
     start_date: str,
     timeframe: str = "month",
@@ -141,53 +138,50 @@ async def get_net_worth_by_account_type(
         Get yearly breakdown:
             get_net_worth_by_account_type(start_date="2020-01-01", timeframe="year")
     """
-    try:
-        if timeframe not in ("month", "year"):
-            return json_success({
-                "success": False,
-                "error": "timeframe must be 'month' or 'year'"
-            })
+    if timeframe not in ("month", "year"):
+        return json_success({
+            "success": False,
+            "error": "timeframe must be 'month' or 'year'"
+        })
 
-        client = await get_monarch_client()
-        result = await client.get_account_snapshots_by_type(
-            start_date=start_date,
-            timeframe=timeframe,
-        )
+    client = await get_monarch_client()
+    result = await client.get_account_snapshots_by_type(
+        start_date=start_date,
+        timeframe=timeframe,
+    )
 
-        # Upstream returns a flat list under key "snapshotsByAccountType"
-        # with shape [{"accountType": str, "month": "YYYY-MM" or "YYYY", "balance": float}, ...]
-        rows = result.get("snapshotsByAccountType", [])
+    # Upstream returns a flat list under key "snapshotsByAccountType"
+    # with shape [{"accountType": str, "month": "YYYY-MM" or "YYYY", "balance": float}, ...]
+    rows = result.get("snapshotsByAccountType", [])
 
-        formatted: Dict[str, Any] = {
-            "timeframe": timeframe,
-            "start_date": start_date,
-            "account_types": []
-        }
+    formatted: Dict[str, Any] = {
+        "timeframe": timeframe,
+        "start_date": start_date,
+        "account_types": []
+    }
 
-        # Group flat rows by accountType, preserving order of first appearance.
-        grouped: Dict[str, Dict[str, Any]] = {}
-        for row in rows:
-            atype = row.get("accountType")
-            if atype is None:
-                continue
-            entry = grouped.setdefault(atype, {"type": atype, "snapshots": []})
-            entry["snapshots"].append({
-                "month": row.get("month"),
-                "balance": row.get("balance"),
-            })
+    # Group flat rows by accountType, preserving order of first appearance.
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        atype = row.get("accountType")
+        if atype is None:
+            continue
+        entry = grouped.setdefault(atype, {"type": atype, "snapshots": []})
+        entry["snapshots"].append({
+            "month": row.get("month"),
+            "balance": row.get("balance"),
+        })
 
-        for type_info in grouped.values():
-            if type_info["snapshots"]:
-                type_info["current_balance"] = type_info["snapshots"][-1].get("balance", 0)
-            formatted["account_types"].append(type_info)
+    for type_info in grouped.values():
+        if type_info["snapshots"]:
+            type_info["current_balance"] = type_info["snapshots"][-1].get("balance", 0)
+        formatted["account_types"].append(type_info)
 
-        total = sum(
-            t.get("current_balance", 0)
-            for t in formatted["account_types"]
-            if t.get("current_balance") is not None
-        )
-        formatted["total_net_worth"] = total
+    total = sum(
+        t.get("current_balance", 0)
+        for t in formatted["account_types"]
+        if t.get("current_balance") is not None
+    )
+    formatted["total_net_worth"] = total
 
-        return json_success(formatted)
-    except Exception as e:
-        return json_error("get_net_worth_by_account_type", e)
+    return json_success(formatted)

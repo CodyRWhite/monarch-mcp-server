@@ -1,11 +1,36 @@
 """Shared helpers for Monarch MCP Server tools."""
 
+import functools
 import json
 import logging
 from datetime import date
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, TypeVar
 
 logger = logging.getLogger(__name__)
+
+F = TypeVar("F", bound=Callable[..., Awaitable[str]])
+
+
+def tool_errors(fn: F) -> F:
+    """Turn an unhandled exception in a tool coroutine into a json_error response.
+
+    Every ``@mcp.tool()`` function used to hand-write
+    ``try: ... except Exception as e: return json_error("name", e)`` around
+    its whole body, with the tool name retyped as a string literal each
+    time -- a second source of truth that can drift from the function's
+    actual name (and, in practice, from the shared payload_errors/
+    json_rejected convention when a new write forgot to call it). This
+    derives the name from the function itself instead.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(*args: Any, **kwargs: Any) -> str:
+        try:
+            return await fn(*args, **kwargs)
+        except Exception as e:
+            return json_error(fn.__name__, e)
+
+    return wrapper  # type: ignore[return-value]
 
 # Monarch has no history before this; used as "the beginning" for an
 # open-ended end_date-only range.

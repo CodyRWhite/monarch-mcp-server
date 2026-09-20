@@ -8,7 +8,7 @@ from gql import gql
 
 from monarch_mcp_server.app import mcp
 from monarch_mcp_server.client import get_monarch_client
-from monarch_mcp_server.helpers import json_success, json_error
+from monarch_mcp_server.helpers import tool_errors, json_success, json_error
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,7 @@ def _stale_days(timestamp: Optional[str]) -> Optional[int]:
 
 
 @mcp.tool()
+@tool_errors
 async def get_account_sync_health(stale_after_days: int = 3) -> str:
     """
     Report the health of each linked institution connection.
@@ -76,62 +77,59 @@ async def get_account_sync_health(stale_after_days: int = 3) -> str:
         JSON with a `needs_attention` list to act on and the full connection
         list. `needs_attention` being empty means every institution is syncing.
     """
-    try:
-        client = await get_monarch_client()
-        result = await client.gql_call(
-            operation="GetCredentialSyncHealth",
-            graphql_query=GET_CREDENTIALS_QUERY,
-            variables={},
-        )
+    client = await get_monarch_client()
+    result = await client.gql_call(
+        operation="GetCredentialSyncHealth",
+        graphql_query=GET_CREDENTIALS_QUERY,
+        variables={},
+    )
 
-        connections: List[Dict[str, Any]] = []
-        for cred in result.get("credentials") or []:
-            institution = cred.get("institution") or {}
-            stale = _stale_days(cred.get("displayLastUpdatedAt"))
+    connections: List[Dict[str, Any]] = []
+    for cred in result.get("credentials") or []:
+        institution = cred.get("institution") or {}
+        stale = _stale_days(cred.get("displayLastUpdatedAt"))
 
-            reasons = []
-            if cred.get("updateRequired"):
-                reasons.append("credentials need re-authentication")
-            if cred.get("disconnectedFromDataProviderAt"):
-                reasons.append("disconnected by the data provider")
-            if cred.get("syncDisabledAt"):
-                reasons.append(
-                    "syncing disabled"
-                    + (f": {cred['syncDisabledReason']}"
-                       if cred.get("syncDisabledReason") else "")
-                )
-            if stale is not None and stale >= stale_after_days:
-                reasons.append(f"no successful update in {stale} days")
+        reasons = []
+        if cred.get("updateRequired"):
+            reasons.append("credentials need re-authentication")
+        if cred.get("disconnectedFromDataProviderAt"):
+            reasons.append("disconnected by the data provider")
+        if cred.get("syncDisabledAt"):
+            reasons.append(
+                "syncing disabled"
+                + (f": {cred['syncDisabledReason']}"
+                   if cred.get("syncDisabledReason") else "")
+            )
+        if stale is not None and stale >= stale_after_days:
+            reasons.append(f"no successful update in {stale} days")
 
-            connections.append({
-                "credential_id": cred.get("id"),
-                "institution": institution.get("name"),
-                "institution_url": institution.get("url"),
-                "data_provider": cred.get("dataProvider"),
-                "last_updated": cred.get("displayLastUpdatedAt"),
-                "stale_days": stale,
-                "update_required": bool(cred.get("updateRequired")),
-                "disconnected_at": cred.get("disconnectedFromDataProviderAt"),
-                "sync_disabled_at": cred.get("syncDisabledAt"),
-                "sync_disabled_reason": cred.get("syncDisabledReason"),
-                "needs_attention": bool(reasons),
-                "reasons": reasons,
-                "accounts": [
-                    a.get("displayName") for a in (cred.get("accounts") or [])
-                ],
-            })
-
-        broken = [c for c in connections if c["needs_attention"]]
-        return json_success({
-            "connection_count": len(connections),
-            "needs_attention_count": len(broken),
-            "note": (
-                "A failing connection does not raise an error anywhere in "
-                "Monarch -- it just stops importing transactions, so check "
-                "this before trusting recent spending or cashflow numbers."
-            ),
-            "needs_attention": broken,
-            "connections": connections,
+        connections.append({
+            "credential_id": cred.get("id"),
+            "institution": institution.get("name"),
+            "institution_url": institution.get("url"),
+            "data_provider": cred.get("dataProvider"),
+            "last_updated": cred.get("displayLastUpdatedAt"),
+            "stale_days": stale,
+            "update_required": bool(cred.get("updateRequired")),
+            "disconnected_at": cred.get("disconnectedFromDataProviderAt"),
+            "sync_disabled_at": cred.get("syncDisabledAt"),
+            "sync_disabled_reason": cred.get("syncDisabledReason"),
+            "needs_attention": bool(reasons),
+            "reasons": reasons,
+            "accounts": [
+                a.get("displayName") for a in (cred.get("accounts") or [])
+            ],
         })
-    except Exception as e:
-        return json_error("get_account_sync_health", e)
+
+    broken = [c for c in connections if c["needs_attention"]]
+    return json_success({
+        "connection_count": len(connections),
+        "needs_attention_count": len(broken),
+        "note": (
+            "A failing connection does not raise an error anywhere in "
+            "Monarch -- it just stops importing transactions, so check "
+            "this before trusting recent spending or cashflow numbers."
+        ),
+        "needs_attention": broken,
+        "connections": connections,
+    })
