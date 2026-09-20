@@ -11,8 +11,9 @@ import logging
 import os
 import stat
 import sys
+import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 from monarchmoney import MonarchMoney
 
 from monarch_mcp_server.monarch_auth import (
@@ -42,10 +43,24 @@ _CHUNK_MARKER = "__monarch_chunks__"
 # (Windows CredWrite rejecting chunk 3 of 5, or the process being killed)
 # would leave the previous index pointing at a mix of old and new bytes, which
 # destroys a working session and, because the keyring is preferred over the
-# file, hides the fallback written by the error path too. Two generations are
-# enough, since the previous one is only deleted once the new index is live.
+# file, hides the fallback written by the error path too.
+#
+# The generation tag is a fresh random token per save, not one of a small
+# fixed set: MCP hosts routinely run more than one server process against the
+# same keyring, and two processes saving around the same time both read the
+# same "previous" generation before either has written anything. Cycling
+# between two fixed values (as an earlier version of this did) means both
+# processes then compute the *same* "next" generation and interleave their
+# chunk writes under identical usernames, corrupting the reassembled blob. A
+# random token makes that collision astronomically unlikely -- concurrent
+# saves land in disjoint chunk usernames, so a race degrades to "one save's
+# generation wins outright" (whichever index write lands last) rather than
+# "the two saves' bytes are interleaved."
 _CHUNK_GEN_MARKER = "__monarch_gen__"
-_CHUNK_GENERATIONS = (0, 1)
+
+
+def _new_generation_token() -> str:
+    return uuid.uuid4().hex[:12]
 # Safety cap when sweeping chunk entries so a misbehaving backend that
 # returns a value for every username can't loop forever.
 _MAX_CHUNKS = 256
@@ -151,21 +166,27 @@ def _keyring_available() -> bool:
     return stored == _PROBE_VALUE
 
 
-def _chunk_username(index: int, generation: Optional[int] = None) -> str:
+_Generation = Optional[Union[int, str]]
+
+
+def _chunk_username(index: int, generation: _Generation = None) -> str:
     """Username for chunk *index*.
 
     ``generation`` of None selects the ungenerationed layout written before
-    generations existed, which must still be readable on upgrade.
+    generations existed, which must still be readable on upgrade. An ``int``
+    generation (0 or 1) is a legacy two-value cycle from before generations
+    became random tokens, also still readable on upgrade.
     """
     if generation is None:
         return f"{_CHUNK_USERNAME_PREFIX}{index}"
     return f"{KEYRING_USERNAME}-g{generation}-chunk-{index}"
 
 
-def _parse_chunk_index(raw: str) -> Optional[Tuple[int, Optional[int]]]:
+def _parse_chunk_index(raw: str) -> Optional[Tuple[int, _Generation]]:
     """Return ``(count, generation)`` if *raw* is a chunk index, else None.
 
-    ``generation`` is None for an index written before generations existed.
+    ``generation`` is None for an index written before generations existed,
+    an ``int`` for the legacy fixed 0/1 cycle, or a ``str`` random token.
     """
     try:
         parsed = json.loads(raw)
@@ -177,7 +198,9 @@ def _parse_chunk_index(raw: str) -> Optional[Tuple[int, Optional[int]]]:
     if not isinstance(count, int) or not 0 < count <= _MAX_CHUNKS:
         return None
     generation = parsed.get(_CHUNK_GEN_MARKER)
-    if not isinstance(generation, int) or generation not in _CHUNK_GENERATIONS:
+    if isinstance(generation, bool) or not isinstance(generation, (int, str)):
+        generation = None
+    elif isinstance(generation, str) and not generation:
         generation = None
     return count, generation
 
@@ -379,7 +402,6 @@ class SecureMonarchSession:
         import keyring
 
         previous = self._current_chunk_index()
-        previous_generation = previous[1] if previous else None
 
         if len(blob) <= _KEYRING_CHUNK_SIZE:
             keyring.set_password(KEYRING_SERVICE, KEYRING_USERNAME, blob)
@@ -392,7 +414,7 @@ class SecureMonarchSession:
                 raise ValueError(
                     f"Session blob too large to chunk: {len(blob)} chars"
                 )
-            generation = self._next_generation(previous_generation)
+            generation = _new_generation_token()
             for i, chunk in enumerate(chunks):
                 keyring.set_password(
                     KEYRING_SERVICE, _chunk_username(i, generation), chunk
@@ -409,7 +431,7 @@ class SecureMonarchSession:
         # housekeeping, so a failure here must not fail the save.
         self._delete_superseded_chunks(previous)
 
-    def _current_chunk_index(self) -> Optional[Tuple[int, Optional[int]]]:
+    def _current_chunk_index(self) -> Optional[Tuple[int, _Generation]]:
         """Return ``(count, generation)`` for the live chunked session, if any."""
         try:
             import keyring
@@ -418,15 +440,6 @@ class SecureMonarchSession:
         except Exception:
             return None
         return _parse_chunk_index(raw) if raw is not None else None
-
-    @staticmethod
-    def _next_generation(previous: Optional[int]) -> int:
-        """Pick a generation tag that cannot collide with the live one."""
-        if previous is None:
-            return _CHUNK_GENERATIONS[0]
-        return _CHUNK_GENERATIONS[
-            (_CHUNK_GENERATIONS.index(previous) + 1) % len(_CHUNK_GENERATIONS)
-        ]
 
     def _keyring_load(self) -> Optional[str]:
         """Load the blob from the keyring, reassembling chunks if needed."""
@@ -457,7 +470,7 @@ class SecureMonarchSession:
         return "".join(parts)
 
     def _delete_superseded_chunks(
-        self, previous: Optional[Tuple[int, Optional[int]]]
+        self, previous: Optional[Tuple[int, _Generation]]
     ) -> None:
         """Delete the chunk entries the previous index pointed at."""
         if previous is None:
@@ -466,7 +479,7 @@ class SecureMonarchSession:
         self._delete_chunk_entries(generation=generation, limit=count)
 
     def _delete_chunk_entries(
-        self, generation: Optional[int] = None, limit: int = _MAX_CHUNKS
+        self, generation: _Generation = None, limit: int = _MAX_CHUNKS
     ) -> None:
         """Delete chunk entries for *generation* until one is absent.
 
@@ -486,11 +499,6 @@ class SecureMonarchSession:
                 keyring.delete_password(KEYRING_SERVICE, username)
             except Exception:
                 break
-
-    def _delete_all_chunk_entries(self) -> None:
-        """Sweep every chunk layout: both generations and the legacy naming."""
-        for generation in (None, *_CHUNK_GENERATIONS):
-            self._delete_chunk_entries(generation=generation)
 
     # -- public API ----------------------------------------------------------
 
@@ -607,13 +615,22 @@ class SecureMonarchSession:
         """Delete the authentication token from all storage backends."""
         # Try keyring
         if self._use_keyring:
+            # Read the live index before deleting it below, so the chunk
+            # sweep targets whichever generation is actually live -- a
+            # legacy int (0/1) or a random token -- rather than guessing at
+            # a fixed set of names.
+            live = self._current_chunk_index()
             try:
                 import keyring
                 keyring.delete_password(KEYRING_SERVICE, KEYRING_USERNAME)
                 logger.info("🗑️ Token deleted from keyring")
             except Exception:
                 pass
-            self._delete_all_chunk_entries()
+            self._delete_superseded_chunks(live)
+            # The pre-generation layout (written before this scheme existed)
+            # has no index entry to read the generation from, so it needs
+            # its own sweep regardless of what `live` was.
+            self._delete_chunk_entries(generation=None)
 
         # Always try file cleanup too
         self._delete_token_file()

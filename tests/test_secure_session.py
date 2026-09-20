@@ -3,7 +3,7 @@
 import json
 import sys
 import types
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -439,19 +439,23 @@ class TestChunkedKeyringStorage:
     def test_small_save_after_oversized_removes_stale_chunks(self, storage_keyring):
         session, fake = storage_keyring
         session.save_session_blob(cookies=_oversized_cookies(), auth_mode="cookie")
+        first_generation = ss_module._parse_chunk_index(
+            fake.get_password(ss_module.KEYRING_SERVICE, ss_module.KEYRING_USERNAME)
+        )[1]
+
         session.save_session_blob(token="tiny-token", auth_mode="token")
 
         loaded = session.load_session()
         assert loaded == {"token": "tiny-token", "auth_mode": "token"}
-        # All chunk entries from the earlier oversized save must be gone.
-        for generation in (None, *ss_module._CHUNK_GENERATIONS):
-            assert (
-                fake.get_password(
-                    ss_module.KEYRING_SERVICE,
-                    ss_module._chunk_username(0, generation),
-                )
-                is None
+        # The chunk entries from the earlier oversized save must be gone,
+        # under whatever generation token that save actually used.
+        assert (
+            fake.get_password(
+                ss_module.KEYRING_SERVICE,
+                ss_module._chunk_username(0, first_generation),
             )
+            is None
+        )
 
     def test_shrinking_oversized_save_removes_extra_chunks(self, storage_keyring):
         """A smaller (but still chunked) save must not leave orphan chunks."""
@@ -508,6 +512,53 @@ class TestChunkedKeyringStorage:
         parsed = json.loads(main)
         assert ss_module._CHUNK_MARKER not in parsed
         assert parsed["token"] == "tok"
+
+
+class TestConcurrentGenerationCollisionAvoidance:
+    """Two MCP server processes racing to save a chunked session must not
+    interleave their chunk writes under identical keyring usernames.
+
+    Both processes read the same "previous" state before either has
+    written anything -- that's what makes it a race. A generation scheme
+    that derives "next" purely from "previous" (the old fixed two-value
+    cycle) makes both processes pick the *same* next generation and
+    collide; a fresh random token per save does not.
+    """
+
+    def test_two_saves_from_the_same_starting_point_use_different_generations(
+        self, storage_keyring
+    ):
+        session, fake = storage_keyring
+        cookies_a = {"cf_clearance": "a" * 3000}
+        cookies_b = {"cf_clearance": "b" * 3000}
+        blob_a = json.dumps({"cookies": cookies_a, "auth_mode": "cookie"})
+        blob_b = json.dumps({"cookies": cookies_b, "auth_mode": "cookie"})
+
+        session._keyring_save(blob_a)
+        index_a = ss_module._parse_chunk_index(
+            fake.get_password(ss_module.KEYRING_SERVICE, ss_module.KEYRING_USERNAME)
+        )
+
+        # A second "process", built fresh, but forced to believe the keyring
+        # is still empty -- exactly what happens when it read `previous`
+        # before process A's write above ever landed.
+        second_session = ss_module.SecureMonarchSession()
+        with patch.object(second_session, "_current_chunk_index", return_value=None):
+            second_session._keyring_save(blob_b)
+        index_b = ss_module._parse_chunk_index(
+            fake.get_password(ss_module.KEYRING_SERVICE, ss_module.KEYRING_USERNAME)
+        )
+
+        assert index_a is not None and index_b is not None
+        assert index_a[1] != index_b[1], (
+            "both saves picked the same generation token; their chunks "
+            "would land under identical keyring usernames and interleave"
+        )
+        # Process A's chunks are untouched by process B's write.
+        chunk_a0 = fake.get_password(
+            ss_module.KEYRING_SERVICE, ss_module._chunk_username(0, index_a[1])
+        )
+        assert chunk_a0 == blob_a[: ss_module._KEYRING_CHUNK_SIZE]
 
 
 class TestFailedSaveIsNonDestructive:

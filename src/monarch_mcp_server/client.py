@@ -1,5 +1,6 @@
 """Cached MonarchMoney client factory."""
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -37,7 +38,12 @@ async def get_monarch_client() -> MonarchMoney:
     if _cached_client is not None:
         return _cached_client
 
-    client = secure_session.get_authenticated_client()
+    # get_authenticated_client() does synchronous keyring I/O (Keychain/
+    # D-Bus/Credential Manager, potentially several round trips for a
+    # chunked session). Run it off the event loop so one slow or locked
+    # keyring doesn't stall every other concurrent request this process is
+    # serving (relevant under the streamable-http transport).
+    client = await asyncio.to_thread(secure_session.get_authenticated_client)
 
     if client is not None:
         logger.info("Using authenticated client from secure keyring storage")

@@ -10,10 +10,11 @@ try:  # mcp >= 2.0
     from mcp.server.mcpserver import Context
 except ImportError:  # mcp < 2.0
     from mcp.server.fastmcp import Context
-from monarchmoney import MonarchMoney, RequireMFAException
+from monarchmoney import RequireMFAException
 from pydantic import BaseModel, Field
 
 from monarch_mcp_server.client import clear_client_cache
+from monarch_mcp_server.monarch_auth import create_monarch_client
 from monarch_mcp_server.secure_session import secure_session
 
 
@@ -70,7 +71,11 @@ async def login_interactive(ctx: Context) -> str:
         return "Login cancelled."
     form = form_result.data
 
-    mm = MonarchMoney()
+    # Not create_monarch_client(token=...): a bare MonarchMoney() here would
+    # still work (it just skips Origin/device-uuid/monarch-client headers),
+    # but Monarch's current API can then reject the reloaded session over a
+    # device-uuid mismatch on every later restart -- see create_monarch_client.
+    mm = create_monarch_client()
     try:
         await mm.login(
             form.email,
@@ -120,9 +125,9 @@ async def login_with_token_interactive(ctx: Context) -> str:
     if not token:
         return "Empty token — aborting."
 
-    mm = MonarchMoney(token=token)
+    mm = create_monarch_client(token=token)
     await mm.get_subscription_details()
-    secure_session.save_token(token)
+    secure_session.save_token(token, device_uuid=mm._headers.get("device-uuid"))
     clear_client_cache()
     return "Session token saved to system keyring."
 
